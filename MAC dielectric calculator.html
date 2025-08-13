@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MAC Dielectric Constant Calculator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .input-label {
+             @apply block text-sm font-medium text-gray-700 mb-1;
+        }
+        .text-input {
+            @apply bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-2.5;
+        }
+        .text-input:disabled {
+            @apply bg-gray-200 text-gray-500 cursor-not-allowed;
+        }
+        .section-title {
+            @apply text-xl font-bold mb-6 border-b pb-3 text-gray-800;
+        }
+        .equation {
+            @apply bg-gray-100 p-4 rounded-lg text-center font-mono text-gray-800 my-2;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+
+    <div class="container mx-auto p-4 md:p-8">
+        
+        <!-- Header -->
+        <div class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-900">MAC Capacitance Analyzer</h1>
+            <p class="mt-2 text-md text-gray-600 max-w-2xl mx-auto">Interactively calculate the MAC layer's dielectric constant (k) based on its thickness and other device parameters.</p>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            
+            <!-- Controls Column -->
+            <div class="lg:col-span-1 bg-white p-6 rounded-xl shadow-lg border border-gray-200">
+                <h2 class="section-title">Actual Measured Parameters</h2>
+                <p class="text-sm text-gray-500 -mt-4 mb-4">Enter the real, measured dimensions of your device here. These values are used for the main graph calculation.</p>
+                
+                <div class="mb-6">
+                    <label for="actualSideLengthInput" class="input-label">Actual Top Contact Side (μm)</label>
+                    <input type="number" id="actualSideLengthInput" value="200" class="text-input">
+                </div>
+
+                <div class="mb-6">
+                    <label for="actualSio2ThickInput" class="input-label">Actual SiO₂ Thickness (nm)</label>
+                    <input type="number" id="actualSio2ThickInput" value="1.7" step="0.1" class="text-input">
+                </div>
+
+
+                <div class="my-6 border-t border-dashed"></div>
+
+                <h2 class="section-title">Theoretical & Measured Inputs</h2>
+                <p class="text-sm text-gray-500 -mt-4 mb-4">Model a theoretical device to get a capacitance value for the graph.</p>
+
+                <div class="mb-6">
+                    <label for="assumedSideLengthInput" class="input-label">Assumed Top Contact Side (μm)</label>
+                    <input type="number" id="assumedSideLengthInput" value="200" class="text-input">
+                </div>
+
+                <div class="mb-6">
+                    <label for="assumedSio2ThickInput" class="input-label">Assumed SiO₂ Thickness (nm)</label>
+                    <input type="number" id="assumedSio2ThickInput" value="1.7" step="0.1" class="text-input">
+                </div>
+
+                <div class="mb-6">
+                    <label for="assumedMacThickInput" class="input-label">Assumed MAC Thickness (nm)</label>
+                    <input type="number" id="assumedMacThickInput" value="5.0" step="0.1" class="text-input">
+                </div>
+
+                <fieldset class="mb-4 border-t pt-4">
+                    <legend class="text-sm font-medium text-gray-900 mb-2">Calculation Mode</legend>
+                    <div class="flex items-center space-x-4">
+                        <div class="flex items-center">
+                            <input id="modeK" type="radio" value="k" name="calcMode" class="w-4 h-4 text-indigo-600 bg-gray-100 border-gray-300 focus:ring-indigo-500" checked>
+                            <label for="modeK" class="ml-2 text-sm font-medium text-gray-700">Use Assumed k</label>
+                        </div>
+                        <div class="flex items-center">
+                            <input id="modeC" type="radio" value="c" name="calcMode" class="w-4 h-4 text-indigo-600 bg-gray-100 border-gray-300 focus:ring-indigo-500">
+                            <label for="modeC" class="ml-2 text-sm font-medium text-gray-700">Use Measured C</label>
+                        </div>
+                    </div>
+                </fieldset>
+
+                <div class="mb-6">
+                    <label for="assumedMacKInput" class="input-label">Assumed MAC k</label>
+                    <input type="number" id="assumedMacKInput" value="1.3" step="0.1" class="text-input">
+                </div>
+                
+                <div>
+                    <label for="measuredCapacitanceInput" class="input-label">Total Measured C (pF)</label>
+                    <input type="number" id="measuredCapacitanceInput" class="text-input" placeholder="Enter value">
+                </div>
+
+            </div>
+
+            <!-- Graph Column -->
+            <div class="lg:col-span-2 bg-white p-6 rounded-xl shadow-lg border border-gray-200">
+                <div id="chartContainer" class="relative h-[400px] md:h-full">
+                    <canvas id="capacitanceChart"></canvas>
+                    <div id="errorMessage" class="absolute inset-0 flex items-center justify-center bg-white bg-opacity-80 text-center p-4 rounded-lg" style="display: none;">
+                        <p class="text-red-600 font-semibold"></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Equations Section -->
+        <div class="mt-8 bg-white p-6 md:p-8 rounded-xl shadow-lg border border-gray-200">
+            <h2 class="section-title">Underlying Physics & Equations</h2>
+            <div class="space-y-6 text-gray-700">
+                <div>
+                    <h3 class="font-semibold text-lg mb-2">1. The Parallel-Plate Capacitor</h3>
+                    <p>The capacitance (C) of a simple parallel-plate capacitor is determined by the dielectric constant (k) of the material between the plates, the vacuum permittivity (ε₀), the area of the plates (A), and the distance between them (d).</p>
+                    <div class="equation">C = (k * ε₀ * A) / d</div>
+                </div>
+                <div>
+                    <h3 class="font-semibold text-lg mb-2">2. Modeling the Device: Capacitors in Series</h3>
+                    <p>Your device stack (Gold/MAC/SiO₂/Silicon) is modeled as two capacitors connected in series: the MAC layer capacitor (C<sub>MAC</sub>) and the SiO₂ layer capacitor (C<sub>SiO₂</sub>).</p>
+                    <p>For capacitors in series, the reciprocal of the total capacitance (C<sub>Total</sub>) is the sum of the reciprocals of the individual capacitances.</p>
+                    <div class="equation">1 / C<sub>Total</sub> = 1 / C<sub>MAC</sub> + 1 / C<sub>SiO₂</sub></div>
+                </div>
+                <div>
+                    <h3 class="font-semibold text-lg mb-2">3. Solving for the MAC Dielectric Constant (k<sub>MAC</sub>)</h3>
+                    <p>To create the graph, we need to express the unknown dielectric constant of the MAC layer (k<sub>MAC</sub>) as a function of its thickness (d<sub>MAC</sub>) and the other known parameters. We start by substituting the parallel-plate formula into the series equation:</p>
+                    <div class="equation">1/C<sub>Total</sub> = d<sub>MAC</sub>/(k<sub>MAC</sub>*ε₀*A) + d<sub>SiO₂</sub>/(k<sub>SiO₂</sub>*ε₀*A)</div>
+                    <p>Through algebraic rearrangement, we can isolate k<sub>MAC</sub>. This is the final equation used by the calculator to plot the graph:</p>
+                    <div class="equation">k<sub>MAC</sub> = d<sub>MAC</sub> / ( (ε₀*A / C<sub>Total</sub>) - (d<sub>SiO₂</sub> / k<sub>SiO₂</sub>) )</div>
+                    <p>This shows that for a given total capacitance and fixed device geometry, the calculated k<sub>MAC</sub> is directly proportional to its actual thickness, d<sub>MAC</sub>.</p>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // --- Constants ---
+        const EPSILON_0 = 8.854187817e-12; // F/m
+        const K_SIO2 = 3.9;
+
+        // --- DOM Elements ---
+        const actualSideLengthInput = document.getElementById('actualSideLengthInput');
+        const actualSio2ThickInput = document.getElementById('actualSio2ThickInput');
+        
+        const assumedSideLengthInput = document.getElementById('assumedSideLengthInput');
+        const assumedSio2ThickInput = document.getElementById('assumedSio2ThickInput');
+        const assumedMacThickInput = document.getElementById('assumedMacThickInput');
+        const assumedMacKInput = document.getElementById('assumedMacKInput');
+        const measuredCapacitanceInput = document.getElementById('measuredCapacitanceInput');
+        
+        const calcModeRadios = document.querySelectorAll('input[name="calcMode"]');
+        const errorMessage = document.getElementById('errorMessage');
+        const ctx = document.getElementById('capacitanceChart').getContext('2d');
+
+        let chart;
+
+        // --- Chart Initialization ---
+        function initializeChart() {
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: { labels: [], datasets: [{ label: 'Calculated MAC Dielectric Constant (k)', data: [], borderColor: 'rgb(79, 70, 229)', backgroundColor: 'rgba(79, 70, 229, 0.1)', borderWidth: 2, tension: 0.1, fill: true, pointRadius: 0 }] },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: {
+                        x: { type: 'linear', position: 'bottom', title: { display: true, text: 'Actual MAC Thickness (nm)', font: { size: 14 } } },
+                        y: { 
+                            title: { display: true, text: 'MAC Dielectric Constant (k)', font: { size: 14 } }
+                        }
+                    },
+                    plugins: {
+                        tooltip: { mode: 'index', intersect: false, callbacks: {
+                            title: (tooltipItems) => `MAC Thickness: ${tooltipItems[0].label} nm`,
+                            label: (tooltipItem) => `Calculated k: ${tooltipItem.formattedValue}`
+                        }},
+                        legend: { display: false },
+                        annotation: {
+                            annotations: {
+                                vLine: {
+                                    type: 'line',
+                                    id: 'vLine',
+                                    mode: 'vertical',
+                                    scaleID: 'x',
+                                    value: 5, // Initial value, will be updated
+                                    borderColor: 'rgb(234, 88, 12)',
+                                    borderWidth: 2,
+                                    borderDash: [6, 6],
+                                    label: {
+                                        enabled: true,
+                                        content: 'Assumed T',
+                                        position: 'start',
+                                        backgroundColor: 'rgba(234, 88, 12, 0.7)'
+                                    }
+                                },
+                                hLine: {
+                                    type: 'line',
+                                    id: 'hLine',
+                                    mode: 'horizontal',
+                                    scaleID: 'y',
+                                    value: 1.3, // Initial value, will be updated
+                                    borderColor: 'rgb(234, 88, 12)',
+                                    borderWidth: 2,
+                                    borderDash: [6, 6],
+                                    label: {
+                                        enabled: true,
+                                        content: 'Assumed k',
+                                        position: 'end',
+                                        backgroundColor: 'rgba(234, 88, 12, 0.7)'
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // --- Input Mode Management ---
+        function toggleInputMode() {
+            const selectedMode = document.querySelector('input[name="calcMode"]:checked').value;
+            if (selectedMode === 'k') {
+                assumedMacKInput.disabled = false;
+                measuredCapacitanceInput.disabled = true;
+            } else { // mode 'c'
+                assumedMacKInput.disabled = true;
+                measuredCapacitanceInput.disabled = false;
+            }
+            updateChart();
+        }
+
+        // --- Main Calculation and Update Function ---
+        function updateChart() {
+            // 1. Read all 'Assumed' physical parameters
+            const assumedSideLength = parseFloat(assumedSideLengthInput.value) * 1e-6; // m
+            const assumedArea = assumedSideLength * assumedSideLength; // m^2
+            const assumedTSio2 = parseFloat(assumedSio2ThickInput.value) * 1e-9; // m
+            const assumedTMac_nm = parseFloat(assumedMacThickInput.value);
+            const assumedTMac = assumedTMac_nm * 1e-9; // m
+
+            // 2. Determine total capacitance and assumed k based on selected mode
+            let cTotal;
+            let kMacAssumed;
+            const selectedMode = document.querySelector('input[name="calcMode"]:checked').value;
+
+            if (selectedMode === 'k') {
+                kMacAssumed = parseFloat(assumedMacKInput.value);
+                if (isNaN(assumedArea) || isNaN(assumedTSio2) || isNaN(assumedTMac) || isNaN(kMacAssumed)) return;
+
+                const cSio2Assumed = (K_SIO2 * EPSILON_0 * assumedArea) / assumedTSio2;
+                const cMacAssumed = (kMacAssumed * EPSILON_0 * assumedArea) / assumedTMac;
+                cTotal = 1 / (1 / cSio2Assumed + 1 / cMacAssumed);
+                
+                measuredCapacitanceInput.value = (cTotal * 1e12).toPrecision(4);
+
+            } else { // mode 'c'
+                cTotal = parseFloat(measuredCapacitanceInput.value) * 1e-12; // F
+                if (isNaN(cTotal) || isNaN(assumedArea) || isNaN(assumedTSio2) || isNaN(assumedTMac) ) return;
+
+                const cSio2Assumed = (K_SIO2 * EPSILON_0 * assumedArea) / assumedTSio2;
+                if (cTotal < cSio2Assumed) {
+                    const cMacAssumed = 1 / (1/cTotal - 1/cSio2Assumed);
+                    kMacAssumed = (cMacAssumed * assumedTMac) / (EPSILON_0 * assumedArea);
+                    assumedMacKInput.value = kMacAssumed.toPrecision(3);
+                } else {
+                    kMacAssumed = NaN;
+                    assumedMacKInput.value = 'N/A';
+                }
+            }
+
+            // 3. Read 'Actual' values for main graph calculation
+            const actualSideLength = parseFloat(actualSideLengthInput.value) * 1e-6; // m
+            const actualArea = actualSideLength * actualSideLength; // m^2
+            const actualTSio2 = parseFloat(actualSio2ThickInput.value) * 1e-9; // m
+
+            if (isNaN(actualArea) || isNaN(actualTSio2) || isNaN(cTotal)) {
+                return;
+            }
+
+            // 4. Check for physical impossibility using ACTUAL values
+            const cSio2_actual = (K_SIO2 * EPSILON_0 * actualArea) / actualTSio2;
+            if (cTotal >= cSio2_actual) {
+                errorMessage.style.display = 'flex';
+                errorMessage.querySelector('p').textContent = 'Error: Total capacitance cannot be >= the actual SiO₂ layer capacitance. Adjust parameters.';
+                chart.data.labels = [];
+                chart.data.datasets[0].data = [];
+                chart.update();
+                return;
+            } else {
+                errorMessage.style.display = 'none';
+            }
+            
+            // 5. Generate data for the plot using ACTUAL values and DYNAMIC range
+            const labels = [];
+            const data = [];
+            const denominatorTerm = (EPSILON_0 * actualArea / cTotal) - (actualTSio2 / K_SIO2);
+
+            if (isNaN(assumedTMac_nm)) return;
+
+            const startThickness = Math.max(0.1, assumedTMac_nm - 5);
+            const endThickness = assumedTMac_nm + 5;
+            const step = 0.1;
+
+            for (let tMacActual_nm = startThickness; tMacActual_nm <= endThickness; tMacActual_nm += step) {
+                const tMacActual = tMacActual_nm * 1e-9; // m
+                const kMacCalculated = tMacActual / denominatorTerm;
+                labels.push(tMacActual_nm.toFixed(1));
+                data.push(kMacCalculated.toFixed(3));
+            }
+            
+            // 6. Update annotations
+            const annotations = chart.options.plugins.annotation.annotations;
+            annotations.vLine.value = assumedTMac_nm;
+            annotations.vLine.label.content = `T = ${assumedTMac_nm.toFixed(1)} nm`;
+            if (!isNaN(kMacAssumed)) {
+                annotations.hLine.value = kMacAssumed;
+                annotations.hLine.label.content = `k = ${kMacAssumed.toFixed(2)}`;
+                annotations.hLine.display = true;
+            } else {
+                annotations.hLine.display = false;
+            }
+
+
+            // 7. Update chart
+            chart.data.labels = labels;
+            chart.data.datasets[0].data = data;
+            chart.update();
+        }
+
+        // --- Event Listeners ---
+        window.onload = () => {
+            initializeChart();
+            toggleInputMode(); // Sets initial state and runs first calculation
+        };
+
+        const allInputs = document.querySelectorAll('.text-input');
+        allInputs.forEach(input => input.addEventListener('input', updateChart));
+        calcModeRadios.forEach(radio => radio.addEventListener('change', toggleInputMode));
+
+    </script>
+</body>
+</html>
