@@ -29,15 +29,6 @@
         .equation {
             @apply bg-gray-100 p-4 rounded-lg text-center font-mono text-gray-800 my-2;
         }
-        .action-button {
-            @apply inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2;
-        }
-        .primary-button {
-             @apply text-white bg-indigo-600 hover:bg-indigo-700 focus:ring-indigo-500;
-        }
-        .secondary-button {
-            @apply text-gray-700 bg-gray-200 hover:bg-gray-300 focus:ring-gray-500;
-        }
     </style>
 </head>
 <body class="bg-gray-50 text-gray-800">
@@ -55,7 +46,7 @@
             <!-- Controls Column -->
             <div class="lg:col-span-1 bg-white p-6 rounded-xl shadow-lg border border-gray-200">
                 <h2 class="section-title">Actual Measured Parameters</h2>
-                <p class="text-sm text-gray-500 mt-2 mb-4">Enter the real, measured dimensions of your device here. These values are used for the main graph calculation.</p>
+                <p class="text-sm text-gray-500 mb-4">Enter the real, measured dimensions of your device here. These values are used for the main graph calculation.</p>
                 
                 <div class="mb-6">
                     <label for="actualSideLengthInput" class="input-label">Actual Top Contact Side (μm)</label>
@@ -71,7 +62,7 @@
                 <div class="my-6 border-t border-dashed"></div>
 
                 <h2 class="section-title">Theoretical & Measured Inputs</h2>
-                <p class="text-sm text-gray-500 mt-2 mb-4">Model a theoretical device to get a capacitance value for the graph.</p>
+                <p class="text-sm text-gray-500 mb-4">Model a theoretical device to get a capacitance value for the graph.</p>
 
                 <div class="mb-6">
                     <label for="assumedSideLengthInput" class="input-label">Assumed Top Contact Side (μm)</label>
@@ -122,11 +113,6 @@
                         <p class="text-red-600 font-semibold"></p>
                     </div>
                 </div>
-                <div class="mt-4 flex flex-wrap gap-2">
-                    <button id="freezeTraceBtn" class="action-button primary-button">Freeze Trace</button>
-                    <button id="clearComparisonBtn" class="action-button secondary-button" style="display: none;">Clear Comparison</button>
-                </div>
-                <div id="legendContainer" class="mt-4 text-sm space-y-1"></div>
             </div>
         </div>
 
@@ -162,14 +148,12 @@
         // --- Constants & Global State ---
         const EPSILON_0 = 8.854187817e-12; // F/m
         const K_SIO2 = 3.9;
-        const TRACE_COLORS = ['#fb923c', '#f87171', '#a78bfa', '#60a5fa']; // Orange, Red, Violet, Blue
         
         let chart;
         let appState = {
             inputs: {},
             calcs: {},
-            livePlotData: { labels: [], data: [] },
-            frozenTraces: [],
+            plotData: { labels: [], data: [] },
             error: null,
         };
 
@@ -186,9 +170,6 @@
             errorMessage: document.getElementById('errorMessage'),
             errorText: document.querySelector('#errorMessage p'),
             ctx: document.getElementById('capacitanceChart').getContext('2d'),
-            freezeTraceBtn: document.getElementById('freezeTraceBtn'),
-            clearComparisonBtn: document.getElementById('clearComparisonBtn'),
-            legendContainer: document.getElementById('legendContainer'),
         };
 
         // --- MODULAR FUNCTIONS ---
@@ -246,14 +227,14 @@
             
             appState.error = null;
             if ([actualArea, actualTSio2, calcs.cTotal].some(isNaN)) {
-                appState.livePlotData = { labels: [], data: [] };
+                appState.plotData = { labels: [], data: [] };
                 return;
             };
 
             const cSio2_actual = (K_SIO2 * EPSILON_0 * actualArea) / actualTSio2;
             if (calcs.cTotal >= cSio2_actual) {
                 appState.error = 'Error: Total capacitance cannot be >= the actual SiO₂ layer capacitance. Adjust parameters.';
-                appState.livePlotData = { labels: [], data: [] };
+                appState.plotData = { labels: [], data: [] };
                 return;
             }
 
@@ -262,7 +243,7 @@
             
             if (denominator <= 0) {
                  appState.error = 'Calculation resulted in a non-physical scenario (denominator is zero or negative).';
-                 appState.livePlotData = { labels: [], data: [] };
+                 appState.plotData = { labels: [], data: [] };
                  return;
             }
 
@@ -279,7 +260,7 @@
                 labels.push(t.toFixed(1));
                 data.push(k.toFixed(3));
             }
-            appState.livePlotData = { labels, data };
+            appState.plotData = { labels, data };
         }
 
         function renderChart() {
@@ -288,19 +269,8 @@
             dom.errorMessage.style.display = appState.error ? 'flex' : 'none';
             dom.errorText.textContent = appState.error || '';
 
-            const liveDataset = {
-                label: 'Live Calculation',
-                data: appState.livePlotData.data,
-                borderColor: 'rgb(79, 70, 229)',
-                backgroundColor: 'rgba(79, 70, 229, 0.1)',
-                borderWidth: 2,
-                tension: 0.1,
-                fill: true,
-                pointRadius: 0,
-            };
-
-            chart.data.labels = appState.livePlotData.labels;
-            chart.data.datasets = [liveDataset, ...appState.frozenTraces.map(t => t.dataset)];
+            chart.data.labels = appState.plotData.labels;
+            chart.data.datasets[0].data = appState.plotData.data;
             
             const { inputs, calcs } = appState;
             const annotations = chart.options.plugins.annotation.annotations;
@@ -311,67 +281,14 @@
                 annotations.hLine.value = calcs.kMacAssumed;
                 annotations.hLine.label.content = `k = ${calcs.kMacAssumed.toFixed(2)}`;
                 annotations.hLine.display = true;
-                annotations.intersection.xValue = inputs.assumedMacT;
-                annotations.intersection.yValue = calcs.kMacAssumed;
-                annotations.intersection.label.content = `(${inputs.assumedMacT.toFixed(1)}, ${calcs.kMacAssumed.toFixed(2)})`;
-                annotations.intersection.display = true;
             } else {
                 annotations.hLine.display = false;
-                annotations.intersection.display = false;
             }
 
             chart.update();
         }
-        
-        function updateLegend() {
-            dom.legendContainer.innerHTML = '';
-            if (appState.frozenTraces.length === 0) {
-                dom.clearComparisonBtn.style.display = 'none';
-                return;
-            }
-            dom.clearComparisonBtn.style.display = 'inline-flex';
-            appState.frozenTraces.forEach(trace => {
-                const legendItem = document.createElement('div');
-                legendItem.className = 'flex items-center';
-                legendItem.innerHTML = `
-                    <span class="h-3 w-3 rounded-full mr-2" style="background-color: ${trace.dataset.borderColor};"></span>
-                    <span>${trace.label}</span>
-                `;
-                dom.legendContainer.appendChild(legendItem);
-            });
-        }
 
         // --- EVENT HANDLERS ---
-
-        function handleFreezeTrace() {
-            if (appState.error || appState.frozenTraces.length >= TRACE_COLORS.length) return;
-            
-            const traceIndex = appState.frozenTraces.length;
-            const color = TRACE_COLORS[traceIndex];
-            const newFrozenTrace = {
-                label: `Trace ${traceIndex + 1}: C=${(appState.calcs.cTotal * 1e12).toFixed(2)}pF, A=${appState.inputs.actualSide}μm, Tₛᵢₒ₂=${appState.inputs.actualSio2}nm`,
-                dataset: {
-                    label: `Trace ${traceIndex + 1}`,
-                    data: [...appState.livePlotData.data],
-                    borderColor: color,
-                    backgroundColor: 'transparent',
-                    borderWidth: 2,
-                    borderDash: [3, 3],
-                    tension: 0.1,
-                    fill: false,
-                    pointRadius: 0,
-                }
-            };
-            appState.frozenTraces.push(newFrozenTrace);
-            renderChart();
-            updateLegend();
-        }
-
-        function handleClearComparison() {
-            appState.frozenTraces = [];
-            renderChart();
-            updateLegend();
-        }
 
         function toggleInputMode() {
             const selectedMode = document.querySelector('input[name="calcMode"]:checked').value;
@@ -392,7 +309,16 @@
                 type: 'line',
                 data: { 
                     labels: [], 
-                    datasets: []
+                    datasets: [{ 
+                        label: 'Calculated MAC Dielectric Constant (k)', 
+                        data: [], 
+                        borderColor: 'rgb(79, 70, 229)', 
+                        backgroundColor: 'rgba(79, 70, 229, 0.1)', 
+                        borderWidth: 2, 
+                        tension: 0.1, 
+                        fill: true, 
+                        pointRadius: 0 
+                    }] 
                 },
                 options: {
                     responsive: true, maintainAspectRatio: false,
@@ -413,32 +339,7 @@
                         annotation: {
                             annotations: {
                                 vLine: { type: 'line', id: 'vLine', mode: 'vertical', scaleID: 'x', value: 5, borderColor: 'rgb(234, 88, 12)', borderWidth: 2, borderDash: [6, 6], label: { enabled: true, content: 'Assumed T', position: 'start', backgroundColor: 'rgba(234, 88, 12, 0.7)' }},
-                                hLine: { type: 'line', id: 'hLine', mode: 'horizontal', scaleID: 'y', value: 1.3, borderColor: 'rgb(234, 88, 12)', borderWidth: 2, borderDash: [6, 6], label: { enabled: true, content: 'Assumed k', position: 'end', backgroundColor: 'rgba(234, 88, 12, 0.7)' }},
-                                intersection: { 
-                                    type: 'point', 
-                                    id: 'intersection', 
-                                    scaleID: 'y', 
-                                    xValue: 5, 
-                                    yValue: 1.3, 
-                                    backgroundColor: 'rgba(234, 88, 12, 0.8)', 
-                                    radius: 5, 
-                                    hoverRadius: 8, 
-                                    label: { 
-                                        enabled: false, 
-                                        content: '(5, 1.3)', 
-                                        position: 'start', 
-                                        yAdjust: -15, 
-                                        backgroundColor: 'rgba(0,0,0,0.7)'
-                                    },
-                                    enter(ctx, event) { 
-                                        ctx.chart.options.plugins.annotation.annotations.intersection.label.enabled = true; 
-                                        ctx.chart.update('none'); 
-                                    },
-                                    leave(ctx, event) { 
-                                        ctx.chart.options.plugins.annotation.annotations.intersection.label.enabled = false; 
-                                        ctx.chart.update('none'); 
-                                    }
-                                }
+                                hLine: { type: 'line', id: 'hLine', mode: 'horizontal', scaleID: 'y', value: 1.3, borderColor: 'rgb(234, 88, 12)', borderWidth: 2, borderDash: [6, 6], label: { enabled: true, content: 'Assumed k', position: 'end', backgroundColor: 'rgba(234, 88, 12, 0.7)' }}
                             }
                         }
                     }
@@ -458,8 +359,6 @@
             }
         });
         dom.calcModeRadios.forEach(radio => radio.addEventListener('change', toggleInputMode));
-        dom.freezeTraceBtn.addEventListener('click', handleFreezeTrace);
-        dom.clearComparisonBtn.addEventListener('click', handleClearComparison);
 
     </script>
 </body>
