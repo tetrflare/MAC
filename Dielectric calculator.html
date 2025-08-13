@@ -29,6 +29,15 @@
         .equation {
             @apply bg-gray-100 p-4 rounded-lg text-center font-mono text-gray-800 my-2;
         }
+        .action-button {
+            @apply inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2;
+        }
+        .primary-button {
+             @apply text-white bg-indigo-600 hover:bg-indigo-700 focus:ring-indigo-500;
+        }
+        .secondary-button {
+            @apply text-gray-700 bg-gray-200 hover:bg-gray-300 focus:ring-gray-500;
+        }
     </style>
 </head>
 <body class="bg-gray-50 text-gray-800">
@@ -46,7 +55,7 @@
             <!-- Controls Column -->
             <div class="lg:col-span-1 bg-white p-6 rounded-xl shadow-lg border border-gray-200">
                 <h2 class="section-title">Actual Measured Parameters</h2>
-                <p class="text-sm text-gray-500 -mt-4 mb-4">Enter the real, measured dimensions of your device here. These values are used for the main graph calculation.</p>
+                <p class="text-sm text-gray-500 mt-2 mb-4">Enter the real, measured dimensions of your device here. These values are used for the main graph calculation.</p>
                 
                 <div class="mb-6">
                     <label for="actualSideLengthInput" class="input-label">Actual Top Contact Side (μm)</label>
@@ -62,7 +71,7 @@
                 <div class="my-6 border-t border-dashed"></div>
 
                 <h2 class="section-title">Theoretical & Measured Inputs</h2>
-                <p class="text-sm text-gray-500 -mt-4 mb-4">Model a theoretical device to get a capacitance value for the graph.</p>
+                <p class="text-sm text-gray-500 mt-2 mb-4">Model a theoretical device to get a capacitance value for the graph.</p>
 
                 <div class="mb-6">
                     <label for="assumedSideLengthInput" class="input-label">Assumed Top Contact Side (μm)</label>
@@ -113,6 +122,11 @@
                         <p class="text-red-600 font-semibold"></p>
                     </div>
                 </div>
+                <div class="mt-4 flex flex-wrap gap-2">
+                    <button id="freezeTraceBtn" class="action-button primary-button">Freeze Trace</button>
+                    <button id="clearComparisonBtn" class="action-button secondary-button" style="display: none;">Clear Comparison</button>
+                </div>
+                <div id="legendContainer" class="mt-4 text-sm space-y-1"></div>
             </div>
         </div>
 
@@ -145,77 +159,284 @@
     </div>
 
     <script>
-        // --- Constants ---
+        // --- Constants & Global State ---
         const EPSILON_0 = 8.854187817e-12; // F/m
         const K_SIO2 = 3.9;
+        const TRACE_COLORS = ['#fb923c', '#f87171', '#a78bfa', '#60a5fa']; // Orange, Red, Violet, Blue
+        
+        let chart;
+        let appState = {
+            inputs: {},
+            calcs: {},
+            livePlotData: { labels: [], data: [] },
+            frozenTraces: [],
+            error: null,
+        };
 
         // --- DOM Elements ---
-        const actualSideLengthInput = document.getElementById('actualSideLengthInput');
-        const actualSio2ThickInput = document.getElementById('actualSio2ThickInput');
-        
-        const assumedSideLengthInput = document.getElementById('assumedSideLengthInput');
-        const assumedSio2ThickInput = document.getElementById('assumedSio2ThickInput');
-        const assumedMacThickInput = document.getElementById('assumedMacThickInput');
-        const assumedMacKInput = document.getElementById('assumedMacKInput');
-        const measuredCapacitanceInput = document.getElementById('measuredCapacitanceInput');
-        
-        const calcModeRadios = document.querySelectorAll('input[name="calcMode"]');
-        const errorMessage = document.getElementById('errorMessage');
-        const ctx = document.getElementById('capacitanceChart').getContext('2d');
+        const dom = {
+            actualSideLengthInput: document.getElementById('actualSideLengthInput'),
+            actualSio2ThickInput: document.getElementById('actualSio2ThickInput'),
+            assumedSideLengthInput: document.getElementById('assumedSideLengthInput'),
+            assumedSio2ThickInput: document.getElementById('assumedSio2ThickInput'),
+            assumedMacThickInput: document.getElementById('assumedMacThickInput'),
+            assumedMacKInput: document.getElementById('assumedMacKInput'),
+            measuredCapacitanceInput: document.getElementById('measuredCapacitanceInput'),
+            calcModeRadios: document.querySelectorAll('input[name="calcMode"]'),
+            errorMessage: document.getElementById('errorMessage'),
+            errorText: document.querySelector('#errorMessage p'),
+            ctx: document.getElementById('capacitanceChart').getContext('2d'),
+            freezeTraceBtn: document.getElementById('freezeTraceBtn'),
+            clearComparisonBtn: document.getElementById('clearComparisonBtn'),
+            legendContainer: document.getElementById('legendContainer'),
+        };
 
-        let chart;
+        // --- MODULAR FUNCTIONS ---
 
-        // --- Chart Initialization ---
+        function readInputsToState() {
+            appState.inputs = {
+                actualSide: parseFloat(dom.actualSideLengthInput.value),
+                actualSio2: parseFloat(dom.actualSio2ThickInput.value),
+                assumedSide: parseFloat(dom.assumedSideLengthInput.value),
+                assumedSio2: parseFloat(dom.assumedSio2ThickInput.value),
+                assumedMacT: parseFloat(dom.assumedMacThickInput.value),
+                assumedMacK: parseFloat(dom.assumedMacKInput.value),
+                measuredC_pF: parseFloat(dom.measuredCapacitanceInput.value),
+                mode: document.querySelector('input[name="calcMode"]:checked').value,
+            };
+        }
+
+        function calculateTheoreticals() {
+            const { inputs } = appState;
+            const assumedArea = Math.pow(inputs.assumedSide * 1e-6, 2);
+            const assumedTSio2 = inputs.assumedSio2 * 1e-9;
+            const assumedTMac = inputs.assumedMacT * 1e-9;
+
+            let cTotal, kMacAssumed;
+
+            if (inputs.mode === 'k') {
+                kMacAssumed = inputs.assumedMacK;
+                if ([assumedArea, assumedTSio2, assumedTMac, kMacAssumed].some(isNaN)) return;
+                
+                const cSio2 = (K_SIO2 * EPSILON_0 * assumedArea) / assumedTSio2;
+                const cMac = (kMacAssumed * EPSILON_0 * assumedArea) / assumedTMac;
+                cTotal = 1 / (1 / cSio2 + 1 / cMac);
+                dom.measuredCapacitanceInput.value = (cTotal * 1e12).toPrecision(4);
+            } else {
+                cTotal = inputs.measuredC_pF * 1e-12;
+                if ([cTotal, assumedArea, assumedTSio2, assumedTMac].some(isNaN)) return;
+
+                const cSio2 = (K_SIO2 * EPSILON_0 * assumedArea) / assumedTSio2;
+                if (cTotal < cSio2) {
+                    const cMac = 1 / (1 / cTotal - 1 / cSio2);
+                    kMacAssumed = (cMac * assumedTMac) / (EPSILON_0 * assumedArea);
+                    dom.assumedMacKInput.value = kMacAssumed.toPrecision(3);
+                } else {
+                    kMacAssumed = NaN;
+                    dom.assumedMacKInput.value = 'N/A';
+                }
+            }
+            appState.calcs = { cTotal, kMacAssumed };
+        }
+        
+        function generatePlotData() {
+            const { inputs, calcs } = appState;
+            const actualArea = Math.pow(inputs.actualSide * 1e-6, 2);
+            const actualTSio2 = inputs.actualSio2 * 1e-9;
+            
+            appState.error = null;
+            if ([actualArea, actualTSio2, calcs.cTotal].some(isNaN)) {
+                appState.livePlotData = { labels: [], data: [] };
+                return;
+            };
+
+            const cSio2_actual = (K_SIO2 * EPSILON_0 * actualArea) / actualTSio2;
+            if (calcs.cTotal >= cSio2_actual) {
+                appState.error = 'Error: Total capacitance cannot be >= the actual SiO₂ layer capacitance. Adjust parameters.';
+                appState.livePlotData = { labels: [], data: [] };
+                return;
+            }
+
+            const labels = [], data = [];
+            const denominator = (EPSILON_0 * actualArea / calcs.cTotal) - (actualTSio2 / K_SIO2);
+            
+            if (denominator <= 0) {
+                 appState.error = 'Calculation resulted in a non-physical scenario (denominator is zero or negative).';
+                 appState.livePlotData = { labels: [], data: [] };
+                 return;
+            }
+
+            const startT = Math.max(0.1, inputs.assumedMacT - 5);
+            const endT = inputs.assumedMacT + 5;
+
+            for (let t = startT; t <= endT; t += 0.1) {
+                const k = (t * 1e-9) / denominator;
+                
+                if (!isFinite(k) || k < 0 || k > 100) { 
+                    continue;
+                }
+
+                labels.push(t.toFixed(1));
+                data.push(k.toFixed(3));
+            }
+            appState.livePlotData = { labels, data };
+        }
+
+        function renderChart() {
+            if (!chart) return;
+            
+            dom.errorMessage.style.display = appState.error ? 'flex' : 'none';
+            dom.errorText.textContent = appState.error || '';
+
+            const liveDataset = {
+                label: 'Live Calculation',
+                data: appState.livePlotData.data,
+                borderColor: 'rgb(79, 70, 229)',
+                backgroundColor: 'rgba(79, 70, 229, 0.1)',
+                borderWidth: 2,
+                tension: 0.1,
+                fill: true,
+                pointRadius: 0,
+            };
+
+            chart.data.labels = appState.livePlotData.labels;
+            chart.data.datasets = [liveDataset, ...appState.frozenTraces.map(t => t.dataset)];
+            
+            const { inputs, calcs } = appState;
+            const annotations = chart.options.plugins.annotation.annotations;
+            annotations.vLine.value = inputs.assumedMacT;
+            annotations.vLine.label.content = `T = ${inputs.assumedMacT.toFixed(1)} nm`;
+            
+            if (!isNaN(calcs.kMacAssumed)) {
+                annotations.hLine.value = calcs.kMacAssumed;
+                annotations.hLine.label.content = `k = ${calcs.kMacAssumed.toFixed(2)}`;
+                annotations.hLine.display = true;
+                annotations.intersection.xValue = inputs.assumedMacT;
+                annotations.intersection.yValue = calcs.kMacAssumed;
+                annotations.intersection.label.content = `(${inputs.assumedMacT.toFixed(1)}, ${calcs.kMacAssumed.toFixed(2)})`;
+                annotations.intersection.display = true;
+            } else {
+                annotations.hLine.display = false;
+                annotations.intersection.display = false;
+            }
+
+            chart.update();
+        }
+        
+        function updateLegend() {
+            dom.legendContainer.innerHTML = '';
+            if (appState.frozenTraces.length === 0) {
+                dom.clearComparisonBtn.style.display = 'none';
+                return;
+            }
+            dom.clearComparisonBtn.style.display = 'inline-flex';
+            appState.frozenTraces.forEach(trace => {
+                const legendItem = document.createElement('div');
+                legendItem.className = 'flex items-center';
+                legendItem.innerHTML = `
+                    <span class="h-3 w-3 rounded-full mr-2" style="background-color: ${trace.dataset.borderColor};"></span>
+                    <span>${trace.label}</span>
+                `;
+                dom.legendContainer.appendChild(legendItem);
+            });
+        }
+
+        // --- EVENT HANDLERS ---
+
+        function handleFreezeTrace() {
+            if (appState.error || appState.frozenTraces.length >= TRACE_COLORS.length) return;
+            
+            const traceIndex = appState.frozenTraces.length;
+            const color = TRACE_COLORS[traceIndex];
+            const newFrozenTrace = {
+                label: `Trace ${traceIndex + 1}: C=${(appState.calcs.cTotal * 1e12).toFixed(2)}pF, A=${appState.inputs.actualSide}μm, Tₛᵢₒ₂=${appState.inputs.actualSio2}nm`,
+                dataset: {
+                    label: `Trace ${traceIndex + 1}`,
+                    data: [...appState.livePlotData.data],
+                    borderColor: color,
+                    backgroundColor: 'transparent',
+                    borderWidth: 2,
+                    borderDash: [3, 3],
+                    tension: 0.1,
+                    fill: false,
+                    pointRadius: 0,
+                }
+            };
+            appState.frozenTraces.push(newFrozenTrace);
+            renderChart();
+            updateLegend();
+        }
+
+        function handleClearComparison() {
+            appState.frozenTraces = [];
+            renderChart();
+            updateLegend();
+        }
+
+        function toggleInputMode() {
+            const selectedMode = document.querySelector('input[name="calcMode"]:checked').value;
+            dom.assumedMacKInput.disabled = (selectedMode === 'c');
+            dom.measuredCapacitanceInput.disabled = (selectedMode === 'k');
+            mainUpdate();
+        }
+        
+        function mainUpdate() {
+            readInputsToState();
+            calculateTheoreticals();
+            generatePlotData();
+            renderChart();
+        }
+
         function initializeChart() {
-            chart = new Chart(ctx, {
+            chart = new Chart(dom.ctx, {
                 type: 'line',
-                data: { labels: [], datasets: [{ label: 'Calculated MAC Dielectric Constant (k)', data: [], borderColor: 'rgb(79, 70, 229)', backgroundColor: 'rgba(79, 70, 229, 0.1)', borderWidth: 2, tension: 0.1, fill: true, pointRadius: 0 }] },
+                data: { 
+                    labels: [], 
+                    datasets: []
+                },
                 options: {
                     responsive: true, maintainAspectRatio: false,
                     scales: {
                         x: { type: 'linear', position: 'bottom', title: { display: true, text: 'Actual MAC Thickness (nm)', font: { size: 14 } } },
                         y: { 
-                            title: { display: true, text: 'MAC Dielectric Constant (k)', font: { size: 14 } }
+                            title: { display: true, text: 'MAC Dielectric Constant (k)', font: { size: 14 } },
+                            min: 0,
+                            grace: '10%'
                         }
                     },
                     plugins: {
                         tooltip: { mode: 'index', intersect: false, callbacks: {
                             title: (tooltipItems) => `MAC Thickness: ${tooltipItems[0].label} nm`,
-                            label: (tooltipItem) => `Calculated k: ${tooltipItem.formattedValue}`
+                            label: (tooltipItem) => `k: ${tooltipItem.formattedValue}`
                         }},
                         legend: { display: false },
                         annotation: {
                             annotations: {
-                                vLine: {
-                                    type: 'line',
-                                    id: 'vLine',
-                                    mode: 'vertical',
-                                    scaleID: 'x',
-                                    value: 5, // Initial value, will be updated
-                                    borderColor: 'rgb(234, 88, 12)',
-                                    borderWidth: 2,
-                                    borderDash: [6, 6],
-                                    label: {
-                                        enabled: true,
-                                        content: 'Assumed T',
-                                        position: 'start',
-                                        backgroundColor: 'rgba(234, 88, 12, 0.7)'
-                                    }
-                                },
-                                hLine: {
-                                    type: 'line',
-                                    id: 'hLine',
-                                    mode: 'horizontal',
-                                    scaleID: 'y',
-                                    value: 1.3, // Initial value, will be updated
-                                    borderColor: 'rgb(234, 88, 12)',
-                                    borderWidth: 2,
-                                    borderDash: [6, 6],
-                                    label: {
-                                        enabled: true,
-                                        content: 'Assumed k',
-                                        position: 'end',
-                                        backgroundColor: 'rgba(234, 88, 12, 0.7)'
+                                vLine: { type: 'line', id: 'vLine', mode: 'vertical', scaleID: 'x', value: 5, borderColor: 'rgb(234, 88, 12)', borderWidth: 2, borderDash: [6, 6], label: { enabled: true, content: 'Assumed T', position: 'start', backgroundColor: 'rgba(234, 88, 12, 0.7)' }},
+                                hLine: { type: 'line', id: 'hLine', mode: 'horizontal', scaleID: 'y', value: 1.3, borderColor: 'rgb(234, 88, 12)', borderWidth: 2, borderDash: [6, 6], label: { enabled: true, content: 'Assumed k', position: 'end', backgroundColor: 'rgba(234, 88, 12, 0.7)' }},
+                                intersection: { 
+                                    type: 'point', 
+                                    id: 'intersection', 
+                                    scaleID: 'y', 
+                                    xValue: 5, 
+                                    yValue: 1.3, 
+                                    backgroundColor: 'rgba(234, 88, 12, 0.8)', 
+                                    radius: 5, 
+                                    hoverRadius: 8, 
+                                    label: { 
+                                        enabled: false, 
+                                        content: '(5, 1.3)', 
+                                        position: 'start', 
+                                        yAdjust: -15, 
+                                        backgroundColor: 'rgba(0,0,0,0.7)'
+                                    },
+                                    enter(ctx, event) { 
+                                        ctx.chart.options.plugins.annotation.annotations.intersection.label.enabled = true; 
+                                        ctx.chart.update('none'); 
+                                    },
+                                    leave(ctx, event) { 
+                                        ctx.chart.options.plugins.annotation.annotations.intersection.label.enabled = false; 
+                                        ctx.chart.update('none'); 
                                     }
                                 }
                             }
@@ -225,126 +446,20 @@
             });
         }
 
-        // --- Input Mode Management ---
-        function toggleInputMode() {
-            const selectedMode = document.querySelector('input[name="calcMode"]:checked').value;
-            if (selectedMode === 'k') {
-                assumedMacKInput.disabled = false;
-                measuredCapacitanceInput.disabled = true;
-            } else { // mode 'c'
-                assumedMacKInput.disabled = true;
-                measuredCapacitanceInput.disabled = false;
-            }
-            updateChart();
-        }
-
-        // --- Main Calculation and Update Function ---
-        function updateChart() {
-            // 1. Read all 'Assumed' physical parameters
-            const assumedSideLength = parseFloat(assumedSideLengthInput.value) * 1e-6; // m
-            const assumedArea = assumedSideLength * assumedSideLength; // m^2
-            const assumedTSio2 = parseFloat(assumedSio2ThickInput.value) * 1e-9; // m
-            const assumedTMac_nm = parseFloat(assumedMacThickInput.value);
-            const assumedTMac = assumedTMac_nm * 1e-9; // m
-
-            // 2. Determine total capacitance and assumed k based on selected mode
-            let cTotal;
-            let kMacAssumed;
-            const selectedMode = document.querySelector('input[name="calcMode"]:checked').value;
-
-            if (selectedMode === 'k') {
-                kMacAssumed = parseFloat(assumedMacKInput.value);
-                if (isNaN(assumedArea) || isNaN(assumedTSio2) || isNaN(assumedTMac) || isNaN(kMacAssumed)) return;
-
-                const cSio2Assumed = (K_SIO2 * EPSILON_0 * assumedArea) / assumedTSio2;
-                const cMacAssumed = (kMacAssumed * EPSILON_0 * assumedArea) / assumedTMac;
-                cTotal = 1 / (1 / cSio2Assumed + 1 / cMacAssumed);
-                
-                measuredCapacitanceInput.value = (cTotal * 1e12).toPrecision(4);
-
-            } else { // mode 'c'
-                cTotal = parseFloat(measuredCapacitanceInput.value) * 1e-12; // F
-                if (isNaN(cTotal) || isNaN(assumedArea) || isNaN(assumedTSio2) || isNaN(assumedTMac) ) return;
-
-                const cSio2Assumed = (K_SIO2 * EPSILON_0 * assumedArea) / assumedTSio2;
-                if (cTotal < cSio2Assumed) {
-                    const cMacAssumed = 1 / (1/cTotal - 1/cSio2Assumed);
-                    kMacAssumed = (cMacAssumed * assumedTMac) / (EPSILON_0 * assumedArea);
-                    assumedMacKInput.value = kMacAssumed.toPrecision(3);
-                } else {
-                    kMacAssumed = NaN;
-                    assumedMacKInput.value = 'N/A';
-                }
-            }
-
-            // 3. Read 'Actual' values for main graph calculation
-            const actualSideLength = parseFloat(actualSideLengthInput.value) * 1e-6; // m
-            const actualArea = actualSideLength * actualSideLength; // m^2
-            const actualTSio2 = parseFloat(actualSio2ThickInput.value) * 1e-9; // m
-
-            if (isNaN(actualArea) || isNaN(actualTSio2) || isNaN(cTotal)) {
-                return;
-            }
-
-            // 4. Check for physical impossibility using ACTUAL values
-            const cSio2_actual = (K_SIO2 * EPSILON_0 * actualArea) / actualTSio2;
-            if (cTotal >= cSio2_actual) {
-                errorMessage.style.display = 'flex';
-                errorMessage.querySelector('p').textContent = 'Error: Total capacitance cannot be >= the actual SiO₂ layer capacitance. Adjust parameters.';
-                chart.data.labels = [];
-                chart.data.datasets[0].data = [];
-                chart.update();
-                return;
-            } else {
-                errorMessage.style.display = 'none';
-            }
-            
-            // 5. Generate data for the plot using ACTUAL values and DYNAMIC range
-            const labels = [];
-            const data = [];
-            const denominatorTerm = (EPSILON_0 * actualArea / cTotal) - (actualTSio2 / K_SIO2);
-
-            if (isNaN(assumedTMac_nm)) return;
-
-            const startThickness = Math.max(0.1, assumedTMac_nm - 5);
-            const endThickness = assumedTMac_nm + 5;
-            const step = 0.1;
-
-            for (let tMacActual_nm = startThickness; tMacActual_nm <= endThickness; tMacActual_nm += step) {
-                const tMacActual = tMacActual_nm * 1e-9; // m
-                const kMacCalculated = tMacActual / denominatorTerm;
-                labels.push(tMacActual_nm.toFixed(1));
-                data.push(kMacCalculated.toFixed(3));
-            }
-            
-            // 6. Update annotations
-            const annotations = chart.options.plugins.annotation.annotations;
-            annotations.vLine.value = assumedTMac_nm;
-            annotations.vLine.label.content = `T = ${assumedTMac_nm.toFixed(1)} nm`;
-            if (!isNaN(kMacAssumed)) {
-                annotations.hLine.value = kMacAssumed;
-                annotations.hLine.label.content = `k = ${kMacAssumed.toFixed(2)}`;
-                annotations.hLine.display = true;
-            } else {
-                annotations.hLine.display = false;
-            }
-
-
-            // 7. Update chart
-            chart.data.labels = labels;
-            chart.data.datasets[0].data = data;
-            chart.update();
-        }
-
         // --- Event Listeners ---
         window.onload = () => {
             initializeChart();
-            toggleInputMode(); // Sets initial state and runs first calculation
+            mainUpdate();
         };
 
-        const allInputs = document.querySelectorAll('.text-input');
-        allInputs.forEach(input => input.addEventListener('input', updateChart));
-        calcModeRadios.forEach(radio => radio.addEventListener('change', toggleInputMode));
+        Object.values(dom).forEach(element => {
+            if (element.nodeName === 'INPUT' && element.type === 'number') {
+                element.addEventListener('input', mainUpdate);
+            }
+        });
+        dom.calcModeRadios.forEach(radio => radio.addEventListener('change', toggleInputMode));
+        dom.freezeTraceBtn.addEventListener('click', handleFreezeTrace);
+        dom.clearComparisonBtn.addEventListener('click', handleClearComparison);
 
     </script>
 </body>
