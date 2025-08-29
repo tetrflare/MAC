@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Python Browser Runner</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Inter and Fira Code -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    <!-- Chart.js for plotting -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .font-mono {
+            font-family: 'Fira Code', monospace;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800 flex flex-col items-center justify-center min-h-screen p-4 sm:p-6 lg:p-8">
+
+    <div class="w-full max-w-4xl">
+        <header class="text-center mb-6">
+            <h1 class="text-4xl font-bold text-gray-900">Python &amp; CSV Visualizer</h1>
+            <p class="text-lg text-gray-600 mt-2">Execute Python code or upload a CSV to plot data. Powered by <a href="https://pyodide.org/" target="_blank" rel="noopener noreferrer" class="text-cyan-600 hover:text-cyan-700">Pyodide</a> &amp; <a href="https://www.chartjs.org/" target="_blank" rel="noopener noreferrer" class="text-cyan-600 hover:text-cyan-700">Chart.js</a>.</p>
+        </header>
+
+        <main class="bg-white border border-gray-200 rounded-xl shadow-2xl p-6">
+            <!-- CSV Plotter Section -->
+            <section class="mb-8">
+                <h2 class="text-2xl font-bold text-gray-900 mb-4 text-center border-b border-gray-200 pb-4">CSV Data Visualizer</h2>
+                <!-- File Upload -->
+                <div class="mt-4 mb-6">
+                    <label for="csv-file-input" class="block text-sm font-medium text-gray-700 mb-2">Upload one or more CSV or TXT files</label>
+                    <input type="file" id="csv-file-input" accept=".csv,.txt" multiple class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-cyan-50 file:text-cyan-700 hover:file:bg-cyan-100 cursor-pointer transition-colors">
+                </div>
+
+                <!-- Chart Display -->
+                <div>
+                    <h3 class="text-lg font-semibold text-gray-800 mb-2">Chart Output (Preview of Uploaded Files)</h3>
+                    <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 shadow-inner">
+                        <canvas id="data-chart" height="450"></canvas>
+                    </div>
+                </div>
+            </section>
+            
+            <!-- Code Editor Section -->
+            <section>
+                <h2 class="text-2xl font-bold text-gray-900 mb-4 text-center border-b border-gray-200 pb-4">Python Code Runner</h2>
+                <div class="mt-4">
+                    <label for="python-code" class="block text-sm font-medium text-gray-700 mb-2">Python Code Editor</label>
+                    <textarea
+                        id="python-code"
+                        class="w-full h-64 p-4 bg-gray-50 text-gray-900 border border-gray-300 rounded-lg shadow-inner font-mono text-sm resize-y focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                        spellcheck="false"
+                    ># This script batch processes multiple files into a single multi-column CSV.
+
+def process_file_content(csv_content):
+    """Processes a single string of CSV data and returns a list of [x, y] pairs."""
+    # 1. Parse Data
+    raw_data = []
+    lines = csv_content.strip().replace('\r', '').split('\n')
+    start_index = 0
+    if len(lines) > 0:
+        parts = lines[0].strip().split(',')
+        if len(parts) == 2:
+            try: float(parts[1])
+            except (ValueError, IndexError): start_index = 1
+    for line in lines[start_index:]:
+        parts = line.strip().split(',')
+        if len(parts) == 2:
+            try:
+                raw_data.append([float(parts[0]), float(parts[1])])
+            except ValueError: continue
+
+    # 2. Filter and Sort
+    filtered_data = sorted([row for row in raw_data if 1000 <= row[0] <= 3400], key=lambda p: p[0])
+
+    if len(filtered_data) < 2:
+        return []
+
+    # 3. Background Subtraction
+    background_region = [row[1] for row in filtered_data if 1800 <= row[0] <= 2200]
+    background_avg = sum(background_region) / len(background_region) if background_region else 0
+    subtracted_data = [[row[0], row[1] - background_avg] for row in filtered_data]
+
+    # 4. Linear Interpolation
+    interpolated_data = []
+    start_x, end_x, step_x = 1000, 3400, 4
+    current_data_idx = 0
+    for new_x in range(start_x, end_x + 1, step_x):
+        while current_data_idx + 1 < len(subtracted_data) and subtracted_data[current_data_idx + 1][0] < new_x:
+            current_data_idx += 1
+        
+        if current_data_idx + 1 >= len(subtracted_data): break
+        x1, y1 = subtracted_data[current_data_idx]
+        x2, y2 = subtracted_data[current_data_idx + 1]
+        
+        if x2 - x1 == 0: new_y = y1
+        else: new_y = y1 + (new_x - x1) * (y2 - y1) / (x2 - x1)
+        interpolated_data.append([new_x, new_y])
+
+    # 5. Scaling
+    scaling_region = [row[1] for row in interpolated_data if 1500 <= row[0] <= 1600]
+    scaling_factor = sum(scaling_region) / len(scaling_region) if scaling_region else 1
+
+    scaled_data = []
+    if scaling_factor != 0:
+        for row in interpolated_data:
+            scaled_data.append([row[0], row[1] / scaling_factor])
+    else: # Avoid division by zero
+        scaled_data = interpolated_data
+        
+    return scaled_data
+
+# --- Main Script ---
+processed_results = []
+file_names = []
+
+try:
+    # 'csv_files' is a list of dicts [{'name': str, 'content': str}] passed from JavaScript
+    if 'csv_files' in globals() and csv_files and len(csv_files) > 0:
+        print(f"# Found {len(csv_files)} uploaded files to process.")
+        for file_info in csv_files:
+            file_names.append(file_info['name'])
+            processed_data = process_file_content(file_info['content'])
+            processed_results.append(processed_data)
+    else:
+        raise NameError("No files uploaded")
+except NameError:
+    print("# No CSV files uploaded. Processing internal sample data as a single file.")
+    sample_data_content = "\n".join([f"{row[0]},{row[1]}" for row in [
+        [500, 10], [800, 15], [1000, 20], [1100, 25], [1200, 35], [1300, 50], [1400, 70], [1500, 80],
+        [1600, 85], [1700, 88], [1800, 90], [1900, 86], [2000, 75], [2100, 60], [2200, 55], [2300, 58],
+        [2400, 65], [2500, 72], [2600, 68], [2700, 60], [2800, 50], [2900, 45], [3000, 48], [3100, 55],
+        [3200, 50], [3300, 40], [3400, 30], [3500, 25], [4000, 20]
+    ]])
+    file_names.append("sample_data")
+    processed_results.append(process_file_content(sample_data_content))
+
+# --- Aggregation and Output ---
+if any(processed_results):
+    # Use the x-values from the first successful result as the reference
+    ref_x_values = [row[0] for row in next(res for res in processed_results if res)]
+    
+    # Create a dictionary mapping x-values to a list of y-values
+    output_dict = {x: [] for x in ref_x_values}
+    for result_set in processed_results:
+        # Create a temp dict for the current file's data for easy lookup
+        temp_data_dict = dict(result_set)
+        for x in ref_x_values:
+            # Append y-value or a blank if this file didn't have this x-value
+            output_dict[x].append(temp_data_dict.get(x, ''))
+
+    # Generate Headers
+    header_names = [name.split('.')[0] for name in file_names]
+    header = "X-Value," + ",".join(header_names)
+    print("\n# --- Plottable Data ---")
+    print(header)
+
+    # Print Data Rows
+    for x, y_values in output_dict.items():
+        y_strings = [f"{y:.4f}" if isinstance(y, (int, float)) else "" for y in y_values]
+        print(f"{x},{','.join(y_strings)}")
+else:
+    print("# No data was processed successfully.")
+</textarea>
+                </div>
+
+                <!-- Action Button -->
+                <div class="mt-4 text-center">
+                    <button
+                        id="run-button"
+                        class="bg-cyan-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-cyan-700 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white focus:ring-cyan-500 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                    >
+                        <span id="button-text">Loading Pyodide...</span>
+                    </button>
+                </div>
+                
+                <!-- Python Chart Section -->
+                <div class="mt-6">
+                    <h3 class="text-lg font-semibold text-gray-800 mb-2">Python Chart Output</h3>
+                    <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 shadow-inner">
+                        <canvas id="python-chart" height="450"></canvas>
+                    </div>
+                </div>
+
+                <!-- Output Section -->
+                <div class="mt-6">
+                    <div class="flex justify-between items-center mb-2">
+                        <h2 class="text-lg font-semibold text-gray-800">Python Output</h2>
+                        <button id="download-button" class="text-sm bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-1 px-3 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white focus:ring-gray-400">
+                            Download
+                        </button>
+                    </div>
+                    <pre id="output" class="w-full min-h-[100px] p-4 bg-gray-50 text-gray-800 border border-gray-300 rounded-lg shadow-inner font-mono text-sm whitespace-pre-wrap break-words"></pre>
+                </div>
+            </section>
+        </main>
+
+        <footer class="text-center mt-8 text-gray-500 text-sm">
+            <p>Created using Pyodide, Chart.js, and Tailwind CSS.</p>
+        </footer>
+    </div>
+
+    <!-- Pyodide script -->
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.25.1/full/pyodide.js"></script>
+
+    <script>
+        // Python Runner Elements
+        const codeEditor = document.getElementById('python-code');
+        const runButton = document.getElementById('run-button');
+        const buttonText = document.getElementById('button-text');
+        const outputElement = document.getElementById('output');
+        const downloadButton = document.getElementById('download-button');
+        const pythonChartCanvas = document.getElementById('python-chart');
+        let pyodide;
+        let pythonChart = null;
+
+        // CSV Plotter Elements
+        const csvFileInput = document.getElementById('csv-file-input');
+        const chartCanvas = document.getElementById('data-chart');
+        let dataChart = null;
+        let uploadedCsvFiles = []; // Array of {name, content} objects
+        let firstOriginalFileName = null; 
+
+        // --- Chart and CSV Logic ---
+
+        function parseSingleColumnCSV(csvText) {
+            const lines = csvText.trim().split(/\r\n|\n/).filter(line => line.trim() !== '' && !line.trim().startsWith('#'));
+            const labels = [];
+            const data = [];
+            const startLine = (lines.length > 0 && isNaN(parseFloat(lines[0].split(',')[1]))) ? 1 : 0;
+            
+            for (let i = startLine; i < lines.length; i++) {
+                const columns = lines[i].split(',');
+                if (columns.length >= 2 && !isNaN(parseFloat(columns[1]))) {
+                    labels.push(columns[0].trim());
+                    data.push(parseFloat(columns[1]));
+                }
+            }
+            return { labels, data };
+        }
+
+        function parseMultiColumnCSV(csvText) {
+            const lines = csvText.trim().split(/\r\n|\n/).filter(line => line.trim() !== '' && !line.trim().startsWith('#'));
+            if (lines.length < 2) return { labels: [], datasets: [] };
+
+            const header = lines[0].split(',');
+            const datasets = [];
+            for (let i = 1; i < header.length; i++) {
+                datasets.push({ label: header[i].trim(), data: [] });
+            }
+
+            const labels = [];
+            for (let i = 1; i < lines.length; i++) {
+                const columns = lines[i].split(',');
+                labels.push(columns[0].trim());
+                for (let j = 1; j < columns.length; j++) {
+                    if (datasets[j - 1]) {
+                        const value = columns[j].trim();
+                        datasets[j - 1].data.push(value === '' ? null : parseFloat(value));
+                    }
+                }
+            }
+            return { labels, datasets };
+        }
+
+        function showCanvasMessage(message, canvas, chart) {
+            if (chart) chart.destroy();
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = '#4b5563';
+            ctx.font = "16px 'Inter', sans-serif";
+            ctx.fillText(message, canvas.width / 2, canvas.height / 2);
+            return null;
+        }
+
+        function renderChart(chartData, canvas, chartInstance) {
+            if (chartInstance) chartInstance.destroy();
+
+            const colors = ['rgb(8, 145, 178)','rgb(219, 39, 119)','rgb(22, 163, 74)','rgb(217, 119, 6)','rgb(124, 58, 237)','rgb(234, 88, 12)'];
+            
+            const finalDatasets = chartData.datasets.map((dataset, index) => ({
+                ...dataset,
+                borderColor: colors[index % colors.length],
+                backgroundColor: colors[index % colors.length].replace('rgb', 'rgba').replace(')', ', 0.1)'),
+                tension: 0.1,
+                borderWidth: 2,
+                pointBackgroundColor: colors[index % colors.length],
+                pointRadius: 2,
+            }));
+
+            const ctx = canvas.getContext('2d');
+            return new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: chartData.labels,
+                    datasets: finalDatasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: { beginAtZero: false, ticks: { color: '#374151' }, grid: { color: '#e5e7eb' } },
+                        x: { ticks: { color: '#374151' }, grid: { color: '#e5e7eb' } }
+                    },
+                    plugins: { legend: { labels: { color: '#1f2937' } } }
+                }
+            });
+        }
+        
+        // --- Event Listeners and Initializers ---
+
+        csvFileInput.addEventListener('change', (event) => {
+            const files = event.target.files;
+            if (!files || files.length === 0) {
+                dataChart = showCanvasMessage('File selection cancelled.', chartCanvas, dataChart);
+                uploadedCsvFiles = [];
+                firstOriginalFileName = null;
+                return;
+            }
+
+            firstOriginalFileName = files[0].name;
+            const fileReadPromises = Array.from(files).map(file => {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = (e) => resolve({ name: file.name, content: e.target.result });
+                    reader.onerror = (e) => reject(e);
+                    reader.readAsText(file);
+                });
+            });
+
+            Promise.all(fileReadPromises).then(results => {
+                uploadedCsvFiles = results;
+                
+                const allDatasets = [];
+                let commonLabels = [];
+                let isFirstFile = true;
+
+                results.forEach(fileResult => {
+                    const parsedData = parseSingleColumnCSV(fileResult.content);
+                    if (parsedData.labels.length > 0) {
+                        if (isFirstFile) {
+                            commonLabels = parsedData.labels;
+                            isFirstFile = false;
+                        }
+                        allDatasets.push({
+                            label: fileResult.name,
+                            data: parsedData.data
+                        });
+                    }
+                });
+
+                if (allDatasets.length > 0) {
+                    const chartData = {
+                        labels: commonLabels,
+                        datasets: allDatasets
+                    };
+                    dataChart = renderChart(chartData, chartCanvas, dataChart);
+                } else {
+                    dataChart = showCanvasMessage('Could not parse valid data from any file.', chartCanvas, dataChart);
+                }
+
+            }).catch(error => {
+                console.error("Error reading files:", error);
+                dataChart = showCanvasMessage('Error reading one or more files.', chartCanvas, dataChart);
+                uploadedCsvFiles = [];
+                firstOriginalFileName = null;
+            });
+        });
+        
+        async function initializePyodide() {
+            outputElement.textContent = 'Initializing Python runtime... This may take a moment.';
+            runButton.disabled = true;
+            try {
+                pyodide = await loadPyodide();
+                outputElement.textContent = 'Python runtime is ready.';
+                buttonText.textContent = 'Run Code';
+                runButton.disabled = false;
+            } catch (error) {
+                console.error('Pyodide failed to load:', error);
+                outputElement.textContent = `Error loading Pyodide: ${error.message}`;
+                buttonText.textContent = 'Error';
+            }
+        }
+
+        async function runPython() {
+            if (!pyodide) return;
+            const code = codeEditor.value;
+            outputElement.textContent = 'Running code...';
+            runButton.disabled = true;
+            buttonText.textContent = 'Running...';
+
+            try {
+                pyodide.globals.set('csv_files', pyodide.toPy(uploadedCsvFiles));
+
+                let fullOutput = '';
+                pyodide.setStdout({ batched: (str) => { fullOutput += str + '\n'; } });
+                pyodide.setStderr({ batched: (str) => { fullOutput += str + '\n'; } });
+                
+                await pyodide.runPythonAsync(code);
+                const trimmedOutput = fullOutput.trim();
+                outputElement.textContent = trimmedOutput || 'Code executed with no output.';
+
+                const chartData = parseMultiColumnCSV(trimmedOutput);
+                if (chartData.labels.length > 0 && chartData.datasets.length > 0) {
+                    pythonChart = renderChart(chartData, pythonChartCanvas, pythonChart);
+                } else {
+                    pythonChart = showCanvasMessage('No plottable CSV data in output.', pythonChartCanvas, pythonChart);
+                }
+            } catch (error) {
+                console.error('Python execution error:', error);
+                outputElement.textContent = `Error: ${error.message}`;
+                pythonChart = showCanvasMessage('Execution failed.', pythonChartCanvas, pythonChart);
+            } finally {
+                runButton.disabled = false;
+                buttonText.textContent = 'Run Code';
+            }
+        }
+
+        function downloadOutput() {
+            const text = outputElement.textContent;
+            const blob = new Blob([text], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+
+            let downloadName = 'python_output.txt';
+            if (firstOriginalFileName) {
+                const lastDotIndex = firstOriginalFileName.lastIndexOf('.');
+                const baseName = lastDotIndex !== -1 ? firstOriginalFileName.substring(0, lastDotIndex) : firstOriginalFileName;
+                downloadName = `${baseName}_batch_py.txt`;
+            }
+
+            a.href = url;
+            a.download = downloadName;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        runButton.addEventListener('click', runPython);
+        downloadButton.addEventListener('click', downloadOutput);
+
+        document.addEventListener('DOMContentLoaded', () => {
+            dataChart = showCanvasMessage('Upload CSV or TXT files to see a preview.', chartCanvas, dataChart);
+            pythonChart = showCanvasMessage('Chart will appear after running Python code.', pythonChartCanvas, pythonChart);
+            initializePyodide();
+        });
+    </script>
+</body>
+</html>
+
