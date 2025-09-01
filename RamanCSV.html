@@ -61,21 +61,34 @@
 
 def process_file_content(csv_content):
     """Processes a single string of CSV data and returns a list of [x, y] pairs."""
-    # 1. Parse Data
     raw_data = []
     lines = csv_content.strip().replace('\r', '').split('\n')
-    start_index = 0
-    if len(lines) > 0:
-        parts = lines[0].strip().split(',')
-        if len(parts) == 2:
-            try: float(parts[1])
-            except (ValueError, IndexError): start_index = 1
-    for line in lines[start_index:]:
-        parts = line.strip().split(',')
-        if len(parts) == 2:
+    if not lines:
+        return []
+
+    # Auto-detect separator by checking for a tab in the first few non-empty lines
+    separator = ','
+    for line in lines:
+        if line.strip(): # Find the first non-empty line
+            if '\t' in line:
+                separator = '\t'
+            break
+            
+    for line in lines:
+        # Skip empty lines
+        if not line.strip():
+            continue
+            
+        parts = line.strip().split(separator)
+        if len(parts) >= 2: # handle cases with more than 2 columns, but only use first two
             try:
-                raw_data.append([float(parts[0]), float(parts[1])])
-            except ValueError: continue
+                # Attempt to convert both parts to float
+                x_val = float(parts[0])
+                y_val = float(parts[1])
+                raw_data.append([x_val, y_val])
+            except (ValueError, IndexError):
+                # This line is likely a header or malformed, so we just skip it
+                continue
 
     # 2. Filter and Sort
     filtered_data = sorted([row for row in raw_data if 1000 <= row[0] <= 3400], key=lambda p: p[0])
@@ -145,27 +158,31 @@ except NameError:
 # --- Aggregation and Output ---
 if any(processed_results):
     # Use the x-values from the first successful result as the reference
-    ref_x_values = [row[0] for row in next(res for res in processed_results if res)]
-    
-    # Create a dictionary mapping x-values to a list of y-values
-    output_dict = {x: [] for x in ref_x_values}
-    for result_set in processed_results:
-        # Create a temp dict for the current file's data for easy lookup
-        temp_data_dict = dict(result_set)
-        for x in ref_x_values:
-            # Append y-value or a blank if this file didn't have this x-value
-            output_dict[x].append(temp_data_dict.get(x, ''))
+    successful_results = [res for res in processed_results if res]
+    if not successful_results:
+        print("# No data was processed successfully.")
+    else:
+        ref_x_values = [row[0] for row in successful_results[0]]
+        
+        # Create a dictionary mapping x-values to a list of y-values
+        output_dict = {x: [] for x in ref_x_values}
+        for result_set in processed_results:
+            # Create a temp dict for the current file's data for easy lookup
+            temp_data_dict = dict(result_set) if result_set else {}
+            for x in ref_x_values:
+                # Append y-value or a blank if this file didn't have this x-value
+                output_dict[x].append(temp_data_dict.get(x, ''))
 
-    # Generate Headers
-    header_names = [name.split('.')[0] for name in file_names]
-    header = "X-Value," + ",".join(header_names)
-    print("\n# --- Plottable Data ---")
-    print(header)
+        # Generate Headers
+        header_names = [name.split('.')[0] for name in file_names]
+        header = "X-Value," + ",".join(header_names)
+        print("\n# --- Plottable Data ---")
+        print(header)
 
-    # Print Data Rows
-    for x, y_values in output_dict.items():
-        y_strings = [f"{y:.4f}" if isinstance(y, (int, float)) else "" for y in y_values]
-        print(f"{x},{','.join(y_strings)}")
+        # Print Data Rows
+        for x, y_values in output_dict.items():
+            y_strings = [f"{y:.4f}" if isinstance(y, (int, float)) else "" for y in y_values]
+            print(f"{x},{','.join(y_strings)}")
 else:
     print("# No data was processed successfully.")
 </textarea>
@@ -231,16 +248,27 @@ else:
         // --- Chart and CSV Logic ---
 
         function parseSingleColumnCSV(csvText) {
-            const lines = csvText.trim().split(/\r\n|\n/).filter(line => line.trim() !== '' && !line.trim().startsWith('#'));
+            const lines = csvText.trim().split(/\r\n|\n/);
             const labels = [];
             const data = [];
-            const startLine = (lines.length > 0 && isNaN(parseFloat(lines[0].split(',')[1]))) ? 1 : 0;
             
-            for (let i = startLine; i < lines.length; i++) {
-                const columns = lines[i].split(',');
-                if (columns.length >= 2 && !isNaN(parseFloat(columns[1]))) {
-                    labels.push(columns[0].trim());
-                    data.push(parseFloat(columns[1]));
+            if (lines.length === 0) return { labels, data };
+
+            // Auto-detect separator from the first non-empty line
+            const firstLine = lines.find(line => line.trim() !== '');
+            const separator = firstLine && firstLine.includes('\t') ? '\t' : ',';
+
+            for (const line of lines) {
+                if (!line.trim()) continue; // skip empty lines
+
+                const columns = line.split(separator);
+                if (columns.length >= 2) {
+                    const xVal = columns[0].trim();
+                    const yVal = parseFloat(columns[1]);
+                    if (!isNaN(yVal)) { // Check if the second column is a number, effectively skipping headers
+                        labels.push(xVal);
+                        data.push(yVal);
+                    }
                 }
             }
             return { labels, data };
@@ -457,5 +485,4 @@ else:
     </script>
 </body>
 </html>
-
 
