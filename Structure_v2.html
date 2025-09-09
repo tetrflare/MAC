@@ -92,7 +92,7 @@
         </div>
         <div class="mb-4">
             <label for="bond-angle-strength" class="text-sm text-gray-200">Bond Angle Strength (<span id="bond-angle-strength-value">0.002</span>)</label>
-            <input id="bond-angle-strength" type="range" min="0.0" max="0.05" step="0.001" value="0.002" class="w-full">
+            <input id="bond-angle-strength" type="range" min="0.0" max="0.01" step="0.0005" value="0.002" class="w-full">
         </div>
         <div class="mb-4">
             <label for="z-displacement-strength" class="text-sm text-gray-200">Initial Z-Displacement (<span id="z-displacement-strength-value">0.1</span>)</label>
@@ -100,6 +100,9 @@
         </div>
         <button id="regenerate-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
             Regenerate
+        </button>
+        <button id="export-csv-btn" class="mt-4 bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">
+            Export CSV
         </button>
     </div>
 
@@ -130,6 +133,7 @@
         const bondAngleStrengthValue = document.getElementById('bond-angle-strength-value');
         const zDisplacementStrengthValue = document.getElementById('z-displacement-strength-value');
         const regenerateBtn = document.getElementById('regenerate-btn');
+        const exportCsvBtn = document.getElementById('export-csv-btn');
 
 
         // --- Default Generation Configuration ---
@@ -556,6 +560,7 @@
         function regenerateModel() {
             regenerateBtn.disabled = true;
             regenerateBtn.textContent = 'Generating...';
+            exportCsvBtn.disabled = true;
             if (currentModel) scene.remove(currentModel);
             
             setTimeout(() => {
@@ -587,6 +592,7 @@
                 statusElement.style.display = 'none';
                 regenerateBtn.disabled = false;
                 regenerateBtn.textContent = 'Regenerate';
+                exportCsvBtn.disabled = false;
 
                 // --- Corrected Camera Framing Logic ---
                 const boundingBox = new THREE.Box3().setFromObject(currentModel);
@@ -607,6 +613,42 @@
                 controls.target.copy(modelCenter);
                 controls.update();
             }, 50);
+        }
+
+        // Function to export model coordinates as a CSV file
+        function exportModelToCsv() {
+            if (!currentModel) {
+                console.error("No model to export.");
+                return;
+            }
+
+            // Find the atom group within the main model group
+            const atomGroup = currentModel.children.find(child => child instanceof THREE.Group && child.children.every(c => c instanceof THREE.Mesh));
+
+            if (!atomGroup) {
+                console.error("Could not find atom group in model.");
+                return;
+            }
+
+            let csvContent = "x,y,z\n";
+
+            atomGroup.children.forEach(atom => {
+                const { x, y, z } = atom.position;
+                csvContent += `${x},${y},${z}\n`;
+            });
+
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            if (link.download !== undefined) {
+                const url = URL.createObjectURL(blob);
+                link.setAttribute("href", url);
+                link.setAttribute("download", "mac_model_coordinates.csv");
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+            }
         }
 
         function setupUI() {
@@ -630,6 +672,8 @@
                 zDisplacementStrengthValue.textContent = e.target.value;
             });
             regenerateBtn.addEventListener('click', regenerateModel);
+            exportCsvBtn.addEventListener('click', exportModelToCsv);
+            exportCsvBtn.disabled = true; // Disable until the first model is generated
         }
 
         function init() {
