@@ -1,1 +1,671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MAC 3D Viewer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background-color: #111827; /* Dark background */
+            color: #E5E7EB; /* Light text for better contrast */
+            font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+            overflow: hidden;
+            touch-action: none;
+        }
 
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            padding: 10px;
+            background-color: rgba(17, 24, 39, 0.5); /* bg-gray-900 with opacity */
+            border-radius: 8px;
+            z-index: 100;
+        }
+
+        #controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            padding: 1rem;
+            background-color: rgba(17, 24, 39, 0.8); /* bg-gray-900 with opacity */
+            border-radius: 0.5rem;
+            border: 1px solid #374151; /* border-gray-700 */
+            width: 280px;
+            z-index: 101;
+        }
+
+        #controls button:disabled {
+            background-color: #374151; /* bg-gray-700 */
+            cursor: not-allowed;
+        }
+
+        #analysis-panel {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background-color: rgba(17, 24, 39, 0.8); /* bg-gray-900 with opacity */
+            padding: 1rem;
+            border-radius: 0.5rem;
+            border: 1px solid #374151; /* border-gray-700 */
+            width: 280px;
+            z-index: 101;
+        }
+
+        /* Additional styling for better readability */
+        #info h1 {
+            color: #FFFFFF; /* White for the main title */
+        }
+        #info p, #controls label {
+            color: #D1D5DB; /* Gray-200 for labels */
+        }
+        #analysis-results strong {
+            color: #F3F4F6; /* Gray-100 for strong text */
+        }
+    </style>
+</head>
+<body>
+
+    <div id="info" class="text-white pointer-events-none">
+        <h1 class="text-2xl font-bold">MAC 3D Viewer</h1>
+        <p class="text-sm">Drag to rotate | Scroll to zoom | Right-click drag to pan</p>
+        <p id="status" class="text-xs mt-2 bg-gray-800 bg-opacity-50 inline-block px-2 py-1 rounded"></p>
+    </div>
+
+    <div id="controls">
+        <div class="mb-4">
+            <label for="packing-density" class="text-sm text-gray-200">Initial Packing Density (<span id="packing-density-value">0</span>%)</label>
+            <input id="packing-density" type="range" min="-20" max="20" step="1" value="0" class="w-full">
+        </div>
+        <div class="mb-4">
+            <label for="num-defects" class="text-sm text-gray-200">Number of Defects (<span id="num-defects-value">250</span>)</label>
+            <input id="num-defects" type="range" min="0" max="1000" value="250" class="w-full">
+        </div>
+        <div class="mb-4">
+            <label for="relax-iterations" class="text-sm text-gray-200">Relaxation Iterations (<span id="relax-iterations-value">500</span>)</label>
+            <input id="relax-iterations" type="range" min="0" max="5000" value="500" class="w-full">
+        </div>
+        <div class="mb-4">
+            <label for="bond-length-strength" class="text-sm text-gray-200">Bond Length Strength (<span id="bond-length-strength-value">0.2</span>)</label>
+            <input id="bond-length-strength" type="range" min="0" max="1.0" step="0.01" value="0.2" class="w-full">
+        </div>
+        <div class="mb-4">
+            <label for="bond-angle-strength" class="text-sm text-gray-200">Bond Angle Strength (<span id="bond-angle-strength-value">0.002</span>)</label>
+            <input id="bond-angle-strength" type="range" min="0.0" max="0.05" step="0.001" value="0.002" class="w-full">
+        </div>
+        <div class="mb-4">
+            <label for="z-displacement-strength" class="text-sm text-gray-200">Initial Z-Displacement (<span id="z-displacement-strength-value">0.1</span>)</label>
+            <input id="z-displacement-strength" type="range" min="0.0" max="1.0" step="0.01" value="0.1" class="w-full">
+        </div>
+        <button id="regenerate-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
+            Regenerate
+        </button>
+    </div>
+
+    <div id="analysis-panel" class="hidden">
+        <h3 class="text-lg font-bold mb-2 text-gray-200">Ring Analysis</h3>
+        <div id="analysis-results"></div>
+    </div>
+
+    <script type="module">
+        // Import necessary three.js modules
+        import * as THREE from 'https://cdn.skypack.dev/three@0.132.2';
+        import { OrbitControls } from 'https://cdn.skypack.dev/three@0.132.2/examples/jsm/controls/OrbitControls.js';
+
+        let scene, camera, renderer, controls, currentModel;
+        const statusElement = document.getElementById('status');
+        
+        // --- UI Elements ---
+        const packingDensitySlider = document.getElementById('packing-density');
+        const numDefectsSlider = document.getElementById('num-defects');
+        const relaxIterationsSlider = document.getElementById('relax-iterations');
+        const bondLengthStrengthSlider = document.getElementById('bond-length-strength');
+        const bondAngleStrengthSlider = document.getElementById('bond-angle-strength');
+        const zDisplacementStrengthSlider = document.getElementById('z-displacement-strength');
+        const packingDensityValue = document.getElementById('packing-density-value');
+        const numDefectsValue = document.getElementById('num-defects-value');
+        const relaxIterationsValue = document.getElementById('relax-iterations-value');
+        const bondLengthStrengthValue = document.getElementById('bond-length-strength-value');
+        const bondAngleStrengthValue = document.getElementById('bond-angle-strength-value');
+        const zDisplacementStrengthValue = document.getElementById('z-displacement-strength-value');
+        const regenerateBtn = document.getElementById('regenerate-btn');
+
+
+        // --- Default Generation Configuration ---
+        const config = {
+            C_C_BOND_LENGTH: 1.42,
+            IDEAL_BOND_ANGLE: 2 * Math.PI / 3, // 120 degrees in radians
+            NUM_CELLS_X: 20,
+            NUM_CELLS_Y: 20,
+            BOND_THRESHOLD_FACTOR: 1.2,
+            MIN_BOND_LENGTH_FACTOR: 0.8,
+            ATOM_RADIUS: 0.3,
+            BOND_RADIUS: 0.08,
+        };
+        
+        function generateGrapheneLattice(numCellsX, numCellsY, packingFactor) {
+            statusElement.textContent = 'Generating perfect graphene lattice...';
+            const atomSet = new Set();
+            const atom_dist = config.C_C_BOND_LENGTH * packingFactor; // Use packing factor here
+            const a1 = new THREE.Vector3(atom_dist * 3 / 2, atom_dist * Math.sqrt(3) / 2, 0);
+            const a2 = new THREE.Vector3(atom_dist * 3 / 2, -atom_dist * Math.sqrt(3) / 2, 0);
+            const b1 = new THREE.Vector3(0, 0, 0);
+            const b2 = new THREE.Vector3(atom_dist, 0, 0);
+            for (let i = -numCellsX; i <= numCellsX; i++) {
+                for (let j = -numCellsY; j <= numCellsY; j++) {
+                    const R = new THREE.Vector3().addScaledVector(a1, i).addScaledVector(a2, j);
+                    const p1 = new THREE.Vector3().addVectors(R, b1);
+                    const p2 = new THREE.Vector3().addVectors(R, b2);
+                    atomSet.add(`${p1.x.toFixed(4)},${p1.y.toFixed(4)},${p1.z.toFixed(4)}`);
+                    atomSet.add(`${p2.x.toFixed(4)},${p2.y.toFixed(4)},${p2.z.toFixed(4)}`);
+                }
+            }
+            return Array.from(atomSet).map(s => s.split(',').map(Number));
+        }
+
+        function introduceStoneWalesDefects(atoms, defectCount, threshold) {
+            statusElement.textContent = 'Introducing defects...';
+            let positions = atoms.map(a => new THREE.Vector3(...a));
+            if (defectCount === 0) return positions.map(p => [p.x, p.y, p.z]);
+
+            let createdDefects = 0;
+            let totalAttempts = 0;
+            const maxTotalAttempts = defectCount * 200; 
+
+            while (createdDefects < defectCount && totalAttempts < maxTotalAttempts) {
+                totalAttempts++;
+                const adj = new Map(positions.map((_, i) => [i, []]));
+                const bonds = [];
+                for (let i = 0; i < positions.length; i++) {
+                    for (let j = i + 1; j < positions.length; j++) {
+                        if (positions[i].distanceTo(positions[j]) < threshold) {
+                            adj.get(i).push(j);
+                            adj.get(j).push(i);
+                            bonds.push([i, j]);
+                        }
+                    }
+                }
+                
+                if (bonds.length === 0) break;
+
+                const randomBond = bonds[Math.floor(Math.random() * bonds.length)];
+                const [i, j] = randomBond;
+                if (adj.get(i).length !== 3 || adj.get(j).length !== 3) {
+                    continue; 
+                }
+
+                const p_i = positions[i];
+                const p_j = positions[j];
+                
+                const midpoint = new THREE.Vector3().addVectors(p_i, p_j).multiplyScalar(0.5);
+                const rotationAxis = new THREE.Vector3(0, 0, 1);
+                const p_i_new = p_i.clone().sub(midpoint).applyAxisAngle(rotationAxis, Math.PI / 2).add(midpoint);
+                const p_j_new = p_j.clone().sub(midpoint).applyAxisAngle(rotationAxis, Math.PI / 2).add(midpoint);
+
+                let clashes = false;
+                const minDistance = config.C_C_BOND_LENGTH * config.MIN_BOND_LENGTH_FACTOR;
+                for (let k = 0; k < positions.length; k++) {
+                    if (k === i || k === j) continue;
+                    
+                    const p_k = positions[k];
+                    if (p_i_new.distanceTo(p_k) < minDistance || p_j_new.distanceTo(p_k) < minDistance) {
+                        clashes = true;
+                        break;
+                    }
+                }
+
+                if (!clashes) {
+                    positions[i].copy(p_i_new);
+                    positions[j].copy(p_j_new);
+                    createdDefects++;
+                    if (createdDefects % 10 === 0 || createdDefects === defectCount) {
+                        statusElement.textContent = `Introducing defects... (${createdDefects}/${defectCount})`;
+                    }
+                }
+            }
+            
+            console.log(`Successfully introduced ${createdDefects} defects after ${totalAttempts} attempts.`);
+            return positions.map(p => [p.x, p.y, p.z]);
+        }
+        
+        function addInitialZDisplacement(atoms, zStrength) {
+            if (zStrength === 0) return atoms;
+            statusElement.textContent = 'Applying initial Z-displacement...';
+            return atoms.map(atom => [atom[0], atom[1], (Math.random() - 0.5) * zStrength]);
+        }
+
+        function determineBondNetwork(atoms) {
+            statusElement.textContent = 'Determining 3-bond network...';
+            const bonds = new Set();
+            const atomVectors = atoms.map(a => new THREE.Vector3(...a));
+
+            for (let i = 0; i < atomVectors.length; i++) {
+                const neighbors = [];
+                for (let j = 0; j < atomVectors.length; j++) {
+                    if (i === j) continue;
+                    const distance = atomVectors[i].distanceTo(atomVectors[j]);
+                    neighbors.push({ index: j, distance: distance });
+                }
+                neighbors.sort((a, b) => a.distance - b.distance);
+                const nearestNeighbors = neighbors.slice(0, 3);
+                for (const neighbor of nearestNeighbors) {
+                    const bondKey = `${Math.min(i, neighbor.index)}-${Math.max(i, neighbor.index)}`;
+                    bonds.add(bondKey);
+                }
+            }
+            return Array.from(bonds).map(b => b.split('-').map(Number));
+        }
+
+        function refineBondNetwork(atoms, initialBonds) {
+            statusElement.textContent = 'Refining bond network...';
+            console.log('Refining bond network...');
+            let bonds = new Set(initialBonds.map(b => `${Math.min(b[0], b[1])}-${Math.max(b[0], b[1])}`));
+            const atomVectors = atoms.map(a => new THREE.Vector3(...a));
+            const maxIterations = 5;
+
+            for (let iter = 0; iter < maxIterations; iter++) {
+                let changesMade = false;
+                const adj = new Map(atomVectors.map((_, i) => [i, []]));
+                const bondList = Array.from(bonds).map(b => b.split('-').map(Number));
+                for(const [u,v] of bondList) {
+                    adj.get(u).push(v);
+                    adj.get(v).push(u);
+                }
+
+                for(let i=0; i<atomVectors.length; i++) {
+                    if (adj.get(i).length > 3) {
+                        const neighbors = adj.get(i);
+                        neighbors.sort((a, b) => atomVectors[i].distanceTo(atomVectors[b]) - atomVectors[i].distanceTo(atomVectors[a]));
+                        const toRemove = neighbors.slice(0, adj.get(i).length - 3);
+                        for(const neighborToRemove of toRemove) {
+                            const bondKey = `${Math.min(i, neighborToRemove)}-${Math.max(i, neighborToRemove)}`;
+                            if(bonds.has(bondKey)) {
+                                bonds.delete(bondKey);
+                                changesMade = true;
+                            }
+                        }
+                    }
+                }
+                
+                if(changesMade) {
+                    const newAdj = new Map(atomVectors.map((_, i) => [i, []]));
+                    const newBondList = Array.from(bonds).map(b => b.split('-').map(Number));
+                     for(const [u,v] of newBondList) {
+                        newAdj.get(u).push(v);
+                        newAdj.get(v).push(u);
+                    }
+                    for(const [key, val] of newAdj.entries()) adj.set(key, val);
+                }
+
+                for(let i=0; i<atomVectors.length; i++) {
+                    if(adj.get(i).length < 3) {
+                        const candidates = [];
+                        for(let j=0; j<atomVectors.length; j++) {
+                           if(i === j || adj.get(j).length >= 3 || adj.get(i).includes(j)) continue;
+                           const dist = atomVectors[i].distanceTo(atomVectors[j]);
+                           if(dist < config.C_C_BOND_LENGTH * 1.5) {
+                               candidates.push({index: j, distance: dist});
+                           }
+                        }
+                        candidates.sort((a,b) => a.distance - b.distance);
+                        
+                        for(const candidate of candidates) {
+                            if(adj.get(i).length >= 3) break;
+                            const j = candidate.index;
+                            const bondKey = `${Math.min(i, j)}-${Math.max(i, j)}`;
+                            if(!bonds.has(bondKey) && !checkIfFormsSmallRing(i, j, adj)) {
+                                bonds.add(bondKey);
+                                adj.get(i).push(j);
+                                adj.get(j).push(i);
+                                changesMade = true;
+                            }
+                        }
+                    }
+                }
+                if (!changesMade) break;
+            }
+            return Array.from(bonds).map(b => b.split('-').map(Number));
+        }
+        
+        function checkIfFormsSmallRing(u, v, adj) {
+            const uNeighbors = adj.get(u);
+            const vNeighbors = adj.get(v);
+            for(const n of uNeighbors) {
+                if(vNeighbors.includes(n)) return true;
+            }
+            return false;
+        }
+
+        function relaxStructure(atoms, bonds, iterations, lengthStrength, angleStrength, idealLength, idealAngle) {
+             console.log(`Relaxing structure for ${iterations} iterations...`);
+             let positions = atoms.map(a => new THREE.Vector3(...a));
+             
+             const adj = new Map(positions.map((_, i) => [i, []]));
+             for(const [u,v] of bonds) {
+                 adj.get(u).push(v);
+                 adj.get(v).push(u);
+             }
+
+             for (let i = 0; i < iterations; i++) {
+                if (i % 5 === 0) statusElement.textContent = `Relaxing structure... (Iteration ${i + 1}/${iterations})`;
+                const forces = positions.map(() => new THREE.Vector3(0, 0, 0));
+
+                for (const bond of bonds) {
+                    const [j, k] = bond;
+                    const p1 = positions[j], p2 = positions[k];
+                    const delta = new THREE.Vector3().subVectors(p2, p1);
+                    const distance = delta.length();
+                    if (distance > 0.1) {
+                        const displacement = distance - idealLength;
+                        const forceMagnitude = lengthStrength * displacement;
+                        const force = delta.normalize().multiplyScalar(forceMagnitude);
+                        forces[j].add(force);
+                        forces[k].sub(force);
+                    }
+                }
+                
+                if (angleStrength > 0) {
+                    const effectiveAngleStrength = angleStrength * 10; 
+                    for (let j = 0; j < positions.length; j++) {
+                        const neighbors = adj.get(j);
+                        if (neighbors.length < 2) continue;
+                        
+                        for (let n1 = 0; n1 < neighbors.length; n1++) {
+                            for (let n2 = n1 + 1; n2 < neighbors.length; n2++) {
+                                const p_center = positions[j];
+                                const p_n1 = positions[neighbors[n1]];
+                                const p_n2 = positions[neighbors[n2]];
+                                const v1 = new THREE.Vector3().subVectors(p_n1, p_center);
+                                const v2 = new THREE.Vector3().subVectors(p_n2, p_center);
+
+                                if (v1.lengthSq() === 0 || v2.lengthSq() === 0) continue;
+
+                                const currentAngle = v1.angleTo(v2);
+                                const angleDisplacement = currentAngle - idealAngle;
+                                
+                                const forceMagnitude = effectiveAngleStrength * Math.sign(angleDisplacement) * Math.pow(angleDisplacement, 2);
+
+                                const cross = new THREE.Vector3().crossVectors(v1, v2);
+                                if (cross.lengthSq() > 1e-8) {
+                                    const forceDir1 = new THREE.Vector3().crossVectors(v1, v2).cross(v1).normalize();
+                                    forces[neighbors[n1]].add(forceDir1.multiplyScalar(forceMagnitude));
+                                    const forceDir2 = new THREE.Vector3().crossVectors(v2, v1).cross(v2).normalize();
+                                    forces[neighbors[n2]].add(forceDir2.multiplyScalar(forceMagnitude));
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                positions.forEach((pos, index) => pos.add(forces[index]));
+            }
+            statusElement.textContent = 'Relaxation complete.';
+            return positions.map(p => [p.x, p.y, p.z]);
+        }
+
+        function analyzeRings(bonds, numAtoms) {
+            statusElement.textContent = 'Analyzing ring structure...';
+            console.log('Analyzing ring structure with new per-bond method...');
+            const adj = new Map();
+            for (let i = 0; i < numAtoms; i++) adj.set(i, []);
+            for (const [u, v] of bonds) {
+                adj.get(u).push(v);
+                adj.get(v).push(u);
+            }
+
+            const ringCounts = { 5: 0, 6: 0, 7: 0, 8: 0, "9+": 0 };
+            const bondsInNonSixRings = new Set();
+
+            const bfs = (start, end, excludedNodes = new Set()) => {
+                const q = [[start, [start]]];
+                const visited = new Set([start, ...excludedNodes]);
+                
+                while (q.length > 0) {
+                    const [curr, path] = q.shift();
+                    if (curr === end) return path;
+                    
+                    for (const neighbor of (adj.get(curr) || [])) {
+                        if (!visited.has(neighbor)) {
+                            visited.add(neighbor);
+                            const newPath = [...path, neighbor];
+                            q.push([neighbor, newPath]);
+                        }
+                    }
+                }
+                return null;
+            };
+
+            for (const bond of bonds) {
+                const [u, v] = bond;
+                
+                const adj_u = adj.get(u);
+                const adj_v = adj.get(v);
+                adj.set(u, adj_u.filter(n => n !== v));
+                adj.set(v, adj_v.filter(n => n !== u));
+
+                let inNonSix = false;
+                const path1 = bfs(u, v);
+                if (path1) {
+                    const size1 = path1.length;
+                    if (size1 !== 6) inNonSix = true;
+                    if (ringCounts.hasOwnProperty(size1)) ringCounts[size1] += 1 / size1;
+                    else if (size1 >= 9) ringCounts["9+"] += 1 / size1;
+
+                    const excluded = new Set(path1.slice(1, -1));
+                    const path2 = bfs(u, v, excluded);
+                    if (path2) {
+                        const size2 = path2.length;
+                         if (size2 !== 6) inNonSix = true;
+                         if (ringCounts.hasOwnProperty(size2)) ringCounts[size2] += 1 / size2;
+                         else if (size2 >= 9) ringCounts["9+"] += 1 / size2;
+                    }
+                }
+
+                if(inNonSix) {
+                    bondsInNonSixRings.add(`${Math.min(u,v)}-${Math.max(u,v)}`);
+                }
+
+                adj.set(u, adj_u);
+                adj.set(v, adj_v);
+            }
+            
+            const totalRings = Object.values(ringCounts).reduce((sum, val) => sum + val, 0);
+            
+            const resultsPanel = document.getElementById('analysis-panel');
+            const resultsDiv = document.getElementById('analysis-results');
+            resultsDiv.innerHTML = '';
+
+            if (totalRings === 0) {
+                resultsDiv.innerHTML = '<p class="text-sm text-gray-400">No rings found.</p>';
+            } else {
+                const categories = [
+                    { size: 5, label: '5-Membered' },
+                    { size: 6, label: '6-Membered' },
+                    { size: 7, label: '7-Membered' },
+                    { size: 8, label: '8-Membered' },
+                    { size: "9+", label: '9+ Membered' }
+                ];
+
+                for (const category of categories) {
+                    const count = ringCounts[category.size];
+                    const fraction = (count / totalRings) * 100;
+                    const p = document.createElement('p');
+                    p.className = 'text-sm text-gray-300 flex justify-between';
+                    p.innerHTML = `<strong>${category.label}:</strong> <span>${count.toFixed(2)} <span class="text-gray-500">(${fraction.toFixed(1)}%)</span></span>`;
+                    resultsDiv.appendChild(p);
+                }
+            }
+            resultsPanel.classList.remove('hidden');
+            return { bondsInNonSixRings };
+        }
+        
+        function createBond(p1, p2, material, group) {
+            const bondDir = new THREE.Vector3().subVectors(p2, p1);
+            const bondLength = bondDir.length();
+            if (bondLength === 0) return;
+            const bondGeometry = new THREE.CylinderGeometry(config.BOND_RADIUS, config.BOND_RADIUS, bondLength, 8);
+            const bondMesh = new THREE.Mesh(bondGeometry, material);
+            bondMesh.position.copy(p1).add(bondDir.multiplyScalar(0.5));
+            bondMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), bondDir.normalize());
+            group.add(bondMesh);
+        }
+
+        function createModel(atomCoordinates, bonds, bondsInNonSixRings) {
+            const atomGroup = new THREE.Group();
+            const bondGroup = new THREE.Group();
+            
+            const defectAtomMaterial = new THREE.MeshStandardMaterial({ color: 0x6b7280, roughness: 0.5 }); // Grey
+            const orderedAtomMaterial = new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.5 }); // Blue
+            const defectBondMaterial = new THREE.MeshStandardMaterial({ color: 0x4b5563, roughness: 0.5 }); // Darker Grey
+            const orderedBondMaterial = new THREE.MeshStandardMaterial({ color: 0x1d4ed8, roughness: 0.5 }); // Darker Blue
+            
+            const atomGeometry = new THREE.SphereGeometry(config.ATOM_RADIUS, 16, 16);
+            const atoms = atomCoordinates.map(coords => new THREE.Vector3(...coords));
+
+            const atomsInNonSixRings = new Set();
+            for (const bondKey of bondsInNonSixRings) {
+                const [u, v] = bondKey.split('-').map(Number);
+                atomsInNonSixRings.add(u);
+                atomsInNonSixRings.add(v);
+            }
+            
+            atoms.forEach((pos, i) => {
+                const material = atomsInNonSixRings.has(i) ? defectAtomMaterial : orderedAtomMaterial;
+                const atomMesh = new THREE.Mesh(atomGeometry, material);
+                atomMesh.position.copy(pos);
+                atomGroup.add(atomMesh);
+            });
+            
+            for (const bond of bonds) {
+                const [i, j] = bond;
+                const bondKey = `${Math.min(i,j)}-${Math.max(i,j)}`;
+                const material = bondsInNonSixRings.has(bondKey) ? defectBondMaterial : orderedBondMaterial;
+                createBond(atoms[i], atoms[j], material, bondGroup);
+            }
+
+            const modelGroup = new THREE.Group();
+            modelGroup.add(atomGroup);
+            modelGroup.add(bondGroup);
+            const boundingBox = new THREE.Box3().setFromObject(modelGroup);
+            const center = boundingBox.getCenter(new THREE.Vector3());
+            modelGroup.position.sub(center);
+            return modelGroup;
+        }
+        
+        function regenerateModel() {
+            regenerateBtn.disabled = true;
+            regenerateBtn.textContent = 'Generating...';
+            if (currentModel) scene.remove(currentModel);
+            
+            setTimeout(() => {
+                const packingDensity = parseInt(packingDensitySlider.value);
+                const numDefects = parseInt(numDefectsSlider.value);
+                const relaxIterations = parseInt(relaxIterationsSlider.value);
+                const lengthStrength = parseFloat(bondLengthStrengthSlider.value);
+                const angleStrength = parseFloat(bondAngleStrengthSlider.value);
+                const zStrength = parseFloat(zDisplacementStrengthSlider.value);
+                
+                const packingFactor = 1 - (packingDensity / 100);
+                const bondThreshold = config.C_C_BOND_LENGTH * config.BOND_THRESHOLD_FACTOR * packingFactor;
+
+                let initialAtoms = generateGrapheneLattice(config.NUM_CELLS_X, config.NUM_CELLS_Y, packingFactor);
+                let defectedAtoms = introduceStoneWalesDefects(initialAtoms, numDefects, bondThreshold);
+                let displacedAtoms = addInitialZDisplacement(defectedAtoms, zStrength);
+
+                let bondNetwork = determineBondNetwork(displacedAtoms);
+                bondNetwork = refineBondNetwork(displacedAtoms, bondNetwork);
+                
+                const analysisResult = analyzeRings(bondNetwork, displacedAtoms.length);
+                
+                let relaxedAtoms = relaxStructure(displacedAtoms, bondNetwork, relaxIterations, lengthStrength, angleStrength, config.C_C_BOND_LENGTH, config.IDEAL_BOND_ANGLE);
+                
+                statusElement.textContent = 'Creating 3D objects...';
+                currentModel = createModel(relaxedAtoms, bondNetwork, analysisResult.bondsInNonSixRings);
+                scene.add(currentModel);
+
+                statusElement.style.display = 'none';
+                regenerateBtn.disabled = false;
+                regenerateBtn.textContent = 'Regenerate';
+
+                // --- Corrected Camera Framing Logic ---
+                const boundingBox = new THREE.Box3().setFromObject(currentModel);
+                const modelCenter = boundingBox.getCenter(new THREE.Vector3());
+                const modelSizeVec = boundingBox.getSize(new THREE.Vector3());
+                const modelSize = Math.max(modelSizeVec.x, modelSizeVec.y, modelSizeVec.z);
+                
+                const fov = camera.fov * (Math.PI / 180);
+                const cameraDistance = (modelSize / 2) / Math.tan(fov / 2);
+
+                const padding = 1.2; 
+                camera.position.set(modelCenter.x, modelCenter.y, modelCenter.z + cameraDistance * padding);
+                
+                camera.near = cameraDistance / 100;
+                camera.far = cameraDistance * 100;
+                camera.updateProjectionMatrix();
+                
+                controls.target.copy(modelCenter);
+                controls.update();
+            }, 50);
+        }
+
+        function setupUI() {
+            packingDensityValue.textContent = packingDensitySlider.value;
+            numDefectsValue.textContent = numDefectsSlider.value;
+            relaxIterationsValue.textContent = relaxIterationsSlider.value;
+            bondLengthStrengthValue.textContent = bondLengthStrengthSlider.value;
+            bondAngleStrengthValue.textContent = bondAngleStrengthSlider.value;
+            zDisplacementStrengthValue.textContent = zDisplacementStrengthSlider.value;
+            
+            packingDensitySlider.addEventListener('input', (e) => packingDensityValue.textContent = e.target.value);
+            numDefectsSlider.addEventListener('input', (e) => numDefectsValue.textContent = e.target.value);
+            relaxIterationsSlider.addEventListener('input', (e) => relaxIterationsValue.textContent = e.target.value);
+            bondLengthStrengthSlider.addEventListener('input', (e) => {
+                bondLengthStrengthValue.textContent = e.target.value;
+            });
+             bondAngleStrengthSlider.addEventListener('input', (e) => {
+                bondAngleStrengthValue.textContent = e.target.value;
+            });
+            zDisplacementStrengthSlider.addEventListener('input', (e) => {
+                zDisplacementStrengthValue.textContent = e.target.value;
+            });
+            regenerateBtn.addEventListener('click', regenerateModel);
+        }
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x111827);
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(5, 10, 7.5);
+            scene.add(directionalLight);
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            setupUI();
+            
+            window.addEventListener('resize', onWindowResize, false);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        init();
+        animate();
+    </script>
+</body>
+</html>
