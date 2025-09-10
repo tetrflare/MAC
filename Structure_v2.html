@@ -147,6 +147,22 @@
         const regenerateBtn = document.getElementById('regenerate-btn');
         const exportCsvBtn = document.getElementById('export-csv-btn');
 
+        // --- Shared Helper function for distance calculation ---
+        const distToSegment2D = (p, segStart, segEnd) => {
+            const seg_dx = segEnd.x - segStart.x;
+            const seg_dy = segEnd.y - segStart.y;
+            const l2 = seg_dx * seg_dx + seg_dy * seg_dy;
+            if (l2 === 0) return Math.sqrt(Math.pow(p.x - segStart.x, 2) + Math.pow(p.y - segStart.y, 2));
+            
+            let t = ((p.x - segStart.x) * seg_dx + (p.y - segStart.y) * seg_dy) / l2;
+            t = Math.max(0, Math.min(1, t));
+
+            const proj_x = segStart.x + t * seg_dx;
+            const proj_y = segStart.y + t * seg_dy;
+            
+            return Math.sqrt(Math.pow(p.x - proj_x, 2) + Math.pow(p.y - proj_y, 2));
+        };
+
 
         // --- Default Generation Configuration ---
         const config = {
@@ -595,9 +611,9 @@
             }));
         }
 
-        function analyzeRings(bonds, numAtoms) {
+        function analyzeRings(bonds, numAtoms, edgeAtoms) {
             statusElement.textContent = 'Analyzing ring structure...';
-            console.log('Analyzing ring structure with new per-bond method...');
+            console.log('Analyzing ring structure, excluding edge bonds...');
             const adj = new Map();
             for (let i = 0; i < numAtoms; i++) adj.set(i, []);
             for (const [u, v] of bonds) {
@@ -630,6 +646,11 @@
             for (const bond of bonds) {
                 const [u, v] = bond;
                 
+                // --- MODIFICATION: Skip analysis for bonds connected to edge atoms ---
+                if (edgeAtoms.has(u) || edgeAtoms.has(v)) {
+                    continue;
+                }
+
                 const adj_u = adj.get(u);
                 const adj_v = adj.get(v);
                 adj.set(u, adj_u.filter(n => n !== v));
@@ -708,13 +729,59 @@
             const atomGroup = new THREE.Group();
             const bondGroup = new THREE.Group();
             
-            // --- Blue/Grey Color Scheme ---
+            // --- Define Materials ---
             const blueAtomMaterial = new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.5 }); // Blue
             const blueBondMaterial = new THREE.MeshStandardMaterial({ color: 0x1d4ed8, roughness: 0.5 }); // Darker Blue
-            const greyAtomMaterial = new THREE.MeshStandardMaterial({ color: 0x6b7280, roughness: 0.5 }); // Grey
-            const greyBondMaterial = new THREE.MeshStandardMaterial({ color: 0x4b5563, roughness: 0.5 }); // Darker Grey
+            const greyAtomMaterial = new THREE.MeshStandardMaterial({ color: 0x6b7280, roughness: 0.5 }); // Grey (defective)
+            const greyBondMaterial = new THREE.MeshStandardMaterial({ color: 0x4b5563, roughness: 0.5 }); // Darker Grey (defective)
+            const edgeAtomMaterial = new THREE.MeshStandardMaterial({ color: 0x8b5cf6, roughness: 0.5 }); // Purple for edges
+            const edgeBondMaterial = new THREE.MeshStandardMaterial({ color: 0x7c3aed, roughness: 0.5 }); // Darker Purple for edges
 
-            // Find all atoms involved in non-six-membered rings
+            const atoms = atomData.map(data => ({
+                pos: new THREE.Vector3(...data.pos),
+                tile: data.tile
+            }));
+            
+            // --- Identify atoms near the model's boundary (sides) ---
+            const edgeThreshold = 3.0; // 3 Angstroms
+            const edgeAtoms = new Set();
+            
+            if (atoms.length > 0) {
+                // 1. Find the four extreme points which define the diamond's vertices.
+                let minXAtom = atoms[0], maxXAtom = atoms[0], minYAtom = atoms[0], maxYAtom = atoms[0];
+                for (let i = 1; i < atoms.length; i++) {
+                    if (atoms[i].pos.x < minXAtom.pos.x) minXAtom = atoms[i];
+                    if (atoms[i].pos.x > maxXAtom.pos.x) maxXAtom = atoms[i];
+                    if (atoms[i].pos.y < minYAtom.pos.y) minYAtom = atoms[i];
+                    if (atoms[i].pos.y > maxYAtom.pos.y) maxYAtom = atoms[i];
+                }
+
+                const corners = [minXAtom.pos, maxYAtom.pos, maxXAtom.pos, minYAtom.pos];
+                const segments = [
+                    [corners[0], corners[1]], // left to top
+                    [corners[1], corners[2]], // top to right
+                    [corners[2], corners[3]], // right to bottom
+                    [corners[3], corners[0]], // bottom to left
+                ];
+
+                // Helper function for the 2D distance from a point to a line segment is now defined globally
+                
+                // 2. Identify atoms close to these side segments
+                atoms.forEach((atom, i) => {
+                    let minDistance = Infinity;
+                    for (const seg of segments) {
+                        const distance = distToSegment2D(atom.pos, seg[0], seg[1]);
+                        if (distance < minDistance) {
+                            minDistance = distance;
+                        }
+                    }
+                    if (minDistance < edgeThreshold) {
+                        edgeAtoms.add(i);
+                    }
+                });
+            }
+
+            // Find all atoms involved in non-six-membered rings (defects)
             const defectiveAtoms = new Set();
             bondsInNonSixRings.forEach(bondKey => {
                 const [u, v] = bondKey.split('-').map(Number);
@@ -723,30 +790,41 @@
             });
             
             const atomGeometry = new THREE.SphereGeometry(config.ATOM_RADIUS, 16, 16);
-            const atoms = atomData.map(data => ({
-                pos: new THREE.Vector3(...data.pos),
-                // tile data is no longer used for coloring but is kept for data consistency
-                tile: data.tile 
-            }));
-
+            
+            // Create atom meshes with appropriate colors
             atoms.forEach((atom, i) => {
-                const material = defectiveAtoms.has(i) ? greyAtomMaterial : blueAtomMaterial;
+                let material;
+                if (edgeAtoms.has(i)) {
+                    material = edgeAtomMaterial;
+                } else if (defectiveAtoms.has(i)) {
+                    material = greyAtomMaterial;
+                } else {
+                    material = blueAtomMaterial;
+                }
                 const atomMesh = new THREE.Mesh(atomGeometry, material);
                 atomMesh.position.copy(atom.pos);
                 atomGroup.add(atomMesh);
             });
             
+            // Create bond meshes with appropriate colors
             for (const bond of bonds) {
                 const [i, j] = bond;
                 const bondKey = `${Math.min(i, j)}-${Math.max(i, j)}`;
-                const material = bondsInNonSixRings.has(bondKey) ? greyBondMaterial : blueBondMaterial;
+                let material;
+                if (edgeAtoms.has(i) || edgeAtoms.has(j)) {
+                    material = edgeBondMaterial;
+                } else if (bondsInNonSixRings.has(bondKey)) {
+                    material = greyBondMaterial;
+                } else {
+                    material = blueBondMaterial;
+                }
                 createBond(atoms[i].pos, atoms[j].pos, material, bondGroup);
             }
 
             const modelGroup = new THREE.Group();
             modelGroup.add(atomGroup);
             modelGroup.add(bondGroup);
-            const boundingBox = new THREE.Box3().setFromObject(modelGroup);
+            const boundingBox = new THREE.Box3().setFromObject(modelGroup); // Re-calculate for centering
             const center = boundingBox.getCenter(new THREE.Vector3());
             modelGroup.position.sub(center);
             return modelGroup;
@@ -784,7 +862,43 @@
                 let bondNetwork = determineBondNetwork(atomPositions);
                 bondNetwork = refineBondNetwork(atomPositions, bondNetwork);
                 
-                const analysisResult = analyzeRings(bondNetwork, displacedAtoms.length);
+                // --- Identify edge atoms for ring analysis exclusion ---
+                const edgeAtomsForAnalysis = new Set();
+                const edgeThreshold = 3.0; // 3 Angstroms
+                const atomsForEdgeDetection = displacedAtoms.map(data => ({ pos: new THREE.Vector3(...data.pos) }));
+                
+                if (atomsForEdgeDetection.length > 0) {
+                    let minXAtom = atomsForEdgeDetection[0], maxXAtom = atomsForEdgeDetection[0], minYAtom = atomsForEdgeDetection[0], maxYAtom = atomsForEdgeDetection[0];
+                    for (let i = 1; i < atomsForEdgeDetection.length; i++) {
+                        if (atomsForEdgeDetection[i].pos.x < minXAtom.pos.x) minXAtom = atomsForEdgeDetection[i];
+                        if (atomsForEdgeDetection[i].pos.x > maxXAtom.pos.x) maxXAtom = atomsForEdgeDetection[i];
+                        if (atomsForEdgeDetection[i].pos.y < minYAtom.pos.y) minYAtom = atomsForEdgeDetection[i];
+                        if (atomsForEdgeDetection[i].pos.y > maxYAtom.pos.y) maxYAtom = atomsForEdgeDetection[i];
+                    }
+
+                    const corners = [minXAtom.pos, maxYAtom.pos, maxXAtom.pos, minYAtom.pos];
+                    const segments = [
+                        [corners[0], corners[1]],
+                        [corners[1], corners[2]],
+                        [corners[2], corners[3]],
+                        [corners[3], corners[0]],
+                    ];
+
+                    atomsForEdgeDetection.forEach((atom, i) => {
+                        let minDistance = Infinity;
+                        for (const seg of segments) {
+                            const distance = distToSegment2D(atom.pos, seg[0], seg[1]);
+                            if (distance < minDistance) {
+                                minDistance = distance;
+                            }
+                        }
+                        if (minDistance < edgeThreshold) {
+                            edgeAtomsForAnalysis.add(i);
+                        }
+                    });
+                }
+                
+                const analysisResult = analyzeRings(bondNetwork, displacedAtoms.length, edgeAtomsForAnalysis);
                 
                 // Pass the full data (with tile info) to the relaxation function
                 let relaxedAtoms = relaxStructure(displacedAtoms, bondNetwork, relaxIterations, lengthStrength, angleStrength, config.C_C_BOND_LENGTH, config.IDEAL_BOND_ANGLE);
@@ -921,8 +1035,3 @@
     </script>
 </body>
 </html>
-
-
-
-
-
