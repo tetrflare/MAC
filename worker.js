@@ -1,6 +1,5 @@
-// Import the THREE.js library, which is necessary for vector math.
-// Note: We don't have access to the DOM or WebGL renderer in a worker.
-importScripts('https://cdn.skypack.dev/three@0.132.2');
+// Replaced importScripts with a modern ES6 module import.
+import * as THREE from 'https://cdn.skypack.dev/three@0.132.2';
 
 // --- Default Generation Configuration (mirrored from main script) ---
 const config = {
@@ -537,3 +536,5 @@ function findEdgeAtoms(atomData) {
     
     return edgeAtoms;
 }
+
+
