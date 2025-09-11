@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MAC 3D Viewer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background-color: #111827; /* Dark background */
+            color: #E5E7EB; /* Light text for better contrast */
+            font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+            overflow: hidden;
+            touch-action: none;
+        }
+
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            padding: 10px;
+            background-color: rgba(17, 24, 39, 0.5); /* bg-gray-900 with opacity */
+            border-radius: 8px;
+            z-index: 100;
+        }
+
+        #controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            padding: 1rem;
+            background-color: rgba(17, 24, 39, 0.8); /* bg-gray-900 with opacity */
+            border-radius: 0.5rem;
+            border: 1px solid #374151; /* border-gray-700 */
+            width: 280px;
+            z-index: 101;
+        }
+
+        #controls button:disabled {
+            background-color: #374151; /* bg-gray-700 */
+            cursor: not-allowed;
+        }
+
+        #analysis-panel {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background-color: rgba(17, 24, 39, 0.8); /* bg-gray-900 with opacity */
+            padding: 1rem;
+            border-radius: 0.5rem;
+            border: 1px solid #374151; /* border-gray-700 */
+            width: 280px;
+            z-index: 101;
+        }
+
+        /* Additional styling for better readability */
+        #info h1 {
+            color: #FFFFFF; /* White for the main title */
+        }
+        #info p, #controls label {
+            color: #D1D5DB; /* Gray-200 for labels */
+        }
+        #analysis-results strong {
+            color: #F3F4F6; /* Gray-100 for strong text */
+        }
+    </style>
+</head>
+<body>
+
+    <div id="info" class="text-white pointer-events-none">
+        <h1 class="text-2xl font-bold">MAC 3D Viewer</h1>
+        <p class="text-sm">Drag to rotate | Scroll to zoom | Right-click drag to pan</p>
+        <p id="status" class="text-xs mt-2 bg-gray-800 bg-opacity-50 inline-block px-2 py-1 rounded"></p>
+    </div>
+
+    <div id="controls">
+        <div class="mb-4">
+            <label for="model-size" class="text-sm text-gray-200">Model Size (<span id="model-size-value">4</span> units)</label>
+            <input id="model-size" type="range" min="2" max="8" step="1" value="4" class="w-full">
+        </div>
+        <div class="mb-4">
+            <label for="packing-density" class="text-sm text-gray-200">Initial Packing Density (<span id="packing-density-value">0</span>%)</label>
+            <input id="packing-density" type="range" min="-20" max="20" step="1" value="0" class="w-full">
+        </div>
+        <div class="mb-4">
+            <label for="num-defects" class="text-sm text-gray-200">Number of Defects (<span id="num-defects-value">300</span>)</label>
+            <input id="num-defects" type="range" min="0" max="1000" value="300" class="w-full">
+        </div>
+        <div class="mb-4">
+            <label for="relax-iterations" class="text-sm text-gray-200">Relaxation Iterations (<span id="relax-iterations-value">500</span>)</label>
+            <input id="relax-iterations" type="range" min="0" max="5000" value="500" class="w-full">
+        </div>
+        <div class="mb-4">
+            <label for="bond-length-strength" class="text-sm text-gray-200">Bond Length Strength (<span id="bond-length-strength-value">0.2</span>)</label>
+            <input id="bond-length-strength" type="range" min="0" max="1.0" step="0.01" value="0.2" class="w-full">
+        </div>
+        <div class="mb-4">
+            <label for="bond-angle-strength" class="text-sm text-gray-200">Bond Angle Strength (<span id="bond-angle-strength-value">0.002</span>)</label>
+            <input id="bond-angle-strength" type="range" min="0.0" max="0.01" step="0.0005" value="0.002" class="w-full">
+        </div>
+        <div class="mb-4">
+            <label for="pristine-angle-strength" class="text-sm text-gray-200">Pristine Angle Strength (<span id="pristine-angle-strength-value">0.2</span>)</label>
+            <input id="pristine-angle-strength" type="range" min="0.0" max="1.0" step="0.01" value="0.2" class="w-full">
+        </div>
+        <div class="mb-4">
+            <label for="z-displacement-strength" class="text-sm text-gray-200">Initial Z-Displacement (<span id="z-displacement-strength-value">0.1</span>)</label>
+            <input id="z-displacement-strength" type="range" min="0.0" max="1.0" step="0.01" value="0.1" class="w-full">
+        </div>
+        <div class="mb-4">
+            <label for="planarity-strength" class="text-sm text-gray-200">Planarity Strength (<span id="planarity-strength-value">0.005</span>)</label>
+            <input id="planarity-strength" type="range" min="0.0" max="0.05" step="0.001" value="0.005" class="w-full">
+        </div>
+        <div class="mb-4">
+            <label for="rotation-angle" class="text-sm text-gray-200">Rotation Angle (<span id="rotation-angle-value">5</span>°)</label>
+            <input id="rotation-angle" type="range" min="0" max="30" step="1" value="5" class="w-full">
+        </div>
+        <button id="regenerate-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
+            Regenerate
+        </button>
+        <button id="export-csv-btn" class="mt-4 bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">
+            Export CSV
+        </button>
+    </div>
+
+    <div id="analysis-panel" class="hidden">
+        <h3 class="text-lg font-bold mb-2 text-gray-200">Ring Analysis</h3>
+        <div id="analysis-results"></div>
+    </div>
+
+    <script type="module">
+        // Import necessary three.js modules
+        import * as THREE from 'https://cdn.skypack.dev/three@0.132.2';
+        import { OrbitControls } from 'https://cdn.skypack.dev/three@0.132.2/examples/jsm/controls/OrbitControls.js';
+
+        let scene, camera, renderer, controls, currentModel;
+        const statusElement = document.getElementById('status');
+        
+        // --- UI Elements ---
+        const modelSizeSlider = document.getElementById('model-size');
+        const packingDensitySlider = document.getElementById('packing-density');
+        const numDefectsSlider = document.getElementById('num-defects');
+        const relaxIterationsSlider = document.getElementById('relax-iterations');
+        const bondLengthStrengthSlider = document.getElementById('bond-length-strength');
+        const bondAngleStrengthSlider = document.getElementById('bond-angle-strength');
+        const pristineAngleStrengthSlider = document.getElementById('pristine-angle-strength');
+        const zDisplacementStrengthSlider = document.getElementById('z-displacement-strength');
+        const planarityStrengthSlider = document.getElementById('planarity-strength');
+        const rotationAngleSlider = document.getElementById('rotation-angle');
+        const modelSizeValue = document.getElementById('model-size-value');
+        const packingDensityValue = document.getElementById('packing-density-value');
+        const numDefectsValue = document.getElementById('num-defects-value');
+        const relaxIterationsValue = document.getElementById('relax-iterations-value');
+        const bondLengthStrengthValue = document.getElementById('bond-length-strength-value');
+        const bondAngleStrengthValue = document.getElementById('bond-angle-strength-value');
+        const pristineAngleStrengthValue = document.getElementById('pristine-angle-strength-value');
+        const zDisplacementStrengthValue = document.getElementById('z-displacement-strength-value');
+        const planarityStrengthValue = document.getElementById('planarity-strength-value');
+        const rotationAngleValue = document.getElementById('rotation-angle-value');
+        const regenerateBtn = document.getElementById('regenerate-btn');
+        const exportCsvBtn = document.getElementById('export-csv-btn');
+        
+        // --- Web Worker ---
+        let modelWorker;
+        
+        function createBond(p1, p2, material, group) {
+            const bondDir = new THREE.Vector3().subVectors(p2, p1);
+            const bondLength = bondDir.length();
+            if (bondLength === 0) return;
+            const bondGeometry = new THREE.CylinderGeometry(0.08, 0.08, bondLength, 8);
+            const bondMesh = new THREE.Mesh(bondGeometry, material);
+            bondMesh.position.copy(p1).add(bondDir.multiplyScalar(0.5));
+            bondMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), bondDir.normalize());
+            group.add(bondMesh);
+        }
+
+        function createModel(atomData, bonds, bondsInNonSixRings, edgeAtomsArray) {
+            const atomGroup = new THREE.Group();
+            const bondGroup = new THREE.Group();
+            
+            // Convert edgeAtomsArray back to a Set for efficient lookup
+            const edgeAtoms = new Set(edgeAtomsArray);
+            
+            // --- Define Materials ---
+            const blueAtomMaterial = new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.5 }); // Blue
+            const blueBondMaterial = new THREE.MeshStandardMaterial({ color: 0x1d4ed8, roughness: 0.5 }); // Darker Blue
+            const greyAtomMaterial = new THREE.MeshStandardMaterial({ color: 0x6b7280, roughness: 0.5 }); // Grey (defective)
+            const greyBondMaterial = new THREE.MeshStandardMaterial({ color: 0x4b5563, roughness: 0.5 }); // Darker Grey (defective)
+            const edgeAtomMaterial = new THREE.MeshStandardMaterial({ color: 0x8b5cf6, roughness: 0.5 }); // Purple for edges
+            const edgeBondMaterial = new THREE.MeshStandardMaterial({ color: 0x7c3aed, roughness: 0.5 }); // Darker Purple for edges
+
+            const atoms = atomData.map(data => ({
+                pos: new THREE.Vector3(...data.pos),
+                tile: data.tile
+            }));
+            
+            const defectiveAtoms = new Set();
+            bondsInNonSixRings.forEach(bondKey => {
+                const [u, v] = bondKey.split('-').map(Number);
+                defectiveAtoms.add(u);
+                defectiveAtoms.add(v);
+            });
+            
+            const atomGeometry = new THREE.SphereGeometry(0.3, 16, 16);
+            
+            atoms.forEach((atom, i) => {
+                let material;
+                if (edgeAtoms.has(i)) {
+                    material = edgeAtomMaterial;
+                } else if (defectiveAtoms.has(i)) {
+                    material = greyAtomMaterial;
+                } else {
+                    material = blueAtomMaterial;
+                }
+                const atomMesh = new THREE.Mesh(atomGeometry, material);
+                atomMesh.position.copy(atom.pos);
+                atomGroup.add(atomMesh);
+            });
+            
+            for (const bond of bonds) {
+                const [i, j] = bond;
+                const bondKey = `${Math.min(i, j)}-${Math.max(i, j)}`;
+                let material;
+                if (edgeAtoms.has(i) || edgeAtoms.has(j)) {
+                    material = edgeBondMaterial;
+                } else if (bondsInNonSixRings.has(bondKey)) {
+                    material = greyBondMaterial;
+                } else {
+                    material = blueBondMaterial;
+                }
+                createBond(atoms[i].pos, atoms[j].pos, material, bondGroup);
+            }
+
+            const modelGroup = new THREE.Group();
+            modelGroup.add(atomGroup);
+            modelGroup.add(bondGroup);
+            const boundingBox = new THREE.Box3().setFromObject(modelGroup);
+            const center = boundingBox.getCenter(new THREE.Vector3());
+            modelGroup.position.sub(center);
+            return modelGroup;
+        }
+
+        function updateAnalysisPanel(ringCounts) {
+            const totalRings = Object.values(ringCounts).reduce((sum, val) => sum + val, 0);
+            
+            const resultsPanel = document.getElementById('analysis-panel');
+            const resultsDiv = document.getElementById('analysis-results');
+            resultsDiv.innerHTML = '';
+
+            if (totalRings === 0) {
+                resultsDiv.innerHTML = '<p class="text-sm text-gray-400">No rings found.</p>';
+            } else {
+                const categories = [
+                    { size: 3, label: '3-Membered' }, { size: 4, label: '4-Membered' },
+                    { size: 5, label: '5-Membered' }, { size: 6, label: '6-Membered' },
+                    { size: 7, label: '7-Membered' }, { size: 8, label: '8-Membered' },
+                    { size: "9+", label: '9+ Membered' }
+                ];
+
+                for (const category of categories) {
+                    const count = ringCounts[category.size] || 0;
+                    const fraction = totalRings > 0 ? (count / totalRings) * 100 : 0;
+                    const p = document.createElement('p');
+                    p.className = 'text-sm text-gray-300 flex justify-between';
+                    p.innerHTML = `<strong>${category.label}:</strong> <span>${Math.round(count)} <span class="text-gray-500">(${fraction.toFixed(1)}%)</span></span>`;
+                    resultsDiv.appendChild(p);
+                }
+            }
+            resultsPanel.classList.remove('hidden');
+        }
+        
+        function regenerateModel() {
+            regenerateBtn.disabled = true;
+            regenerateBtn.textContent = 'Generating...';
+            exportCsvBtn.disabled = true;
+            statusElement.style.display = 'inline-block';
+            statusElement.textContent = 'Initializing worker...';
+            if (currentModel) scene.remove(currentModel);
+
+            modelWorker = new Worker('worker.js');
+
+            modelWorker.onmessage = function(e) {
+                const { type, data, message } = e.data;
+
+                if (type === 'status') {
+                    statusElement.textContent = message;
+                } else if (type === 'result') {
+                    statusElement.textContent = 'Creating 3D objects...';
+
+                    const { relaxedAtoms, bondNetwork, analysisResult, edgeAtoms } = data;
+                    
+                    currentModel = createModel(relaxedAtoms, bondNetwork, analysisResult.bondsInNonSixRings, edgeAtoms);
+                    scene.add(currentModel);
+                    
+                    updateAnalysisPanel(analysisResult.ringCounts);
+
+                    statusElement.style.display = 'none';
+                    regenerateBtn.disabled = false;
+                    regenerateBtn.textContent = 'Regenerate';
+                    exportCsvBtn.disabled = false;
+
+                    const boundingBox = new THREE.Box3().setFromObject(currentModel);
+                    const modelCenter = boundingBox.getCenter(new THREE.Vector3());
+                    const modelSizeVec = boundingBox.getSize(new THREE.Vector3());
+                    const modelSize = Math.max(modelSizeVec.x, modelSizeVec.y, modelSizeVec.z);
+                    
+                    const fov = camera.fov * (Math.PI / 180);
+                    const cameraDistance = (modelSize / 2) / Math.tan(fov / 2);
+
+                    const padding = 1.2; 
+                    camera.position.set(modelCenter.x, modelCenter.y, modelCenter.z + cameraDistance * padding);
+                    
+                    camera.near = cameraDistance / 100;
+                    camera.far = cameraDistance * 100;
+                    camera.updateProjectionMatrix();
+                    
+                    controls.target.copy(modelCenter);
+                    controls.update();
+
+                    modelWorker.terminate();
+                }
+            };
+            
+            const params = {
+                modelSize: parseInt(modelSizeSlider.value),
+                packingDensity: parseInt(packingDensitySlider.value),
+                numDefects: parseInt(numDefectsSlider.value),
+                relaxIterations: parseInt(relaxIterationsSlider.value),
+                lengthStrength: parseFloat(bondLengthStrengthSlider.value),
+                angleStrength: parseFloat(bondAngleStrengthSlider.value),
+                pristineAngleStrength: parseFloat(pristineAngleStrengthSlider.value),
+                zStrength: parseFloat(zDisplacementStrengthSlider.value),
+                planarityStrength: parseFloat(planarityStrengthSlider.value),
+                rotationAngle: parseInt(rotationAngleSlider.value)
+            };
+            
+            modelWorker.postMessage(params);
+        }
+
+        function exportModelToCsv() {
+            if (!currentModel) return;
+            const atomGroup = currentModel.children.find(child => child.children.every(c => c.geometry.type === 'SphereGeometry'));
+            if (!atomGroup) return;
+
+            let csvContent = "x,y,z\n";
+            atomGroup.children.forEach(atom => {
+                const { x, y, z } = atom.position;
+                csvContent += `${x.toFixed(6)},${y.toFixed(6)},${z.toFixed(6)}\n`;
+            });
+
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            const url = URL.createObjectURL(blob);
+            link.setAttribute("href", url);
+            link.setAttribute("download", "mac_model_coordinates.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        }
+
+        function setupUI() {
+            modelSizeValue.textContent = modelSizeSlider.value;
+            packingDensityValue.textContent = packingDensitySlider.value;
+            numDefectsValue.textContent = numDefectsSlider.value;
+            relaxIterationsValue.textContent = relaxIterationsSlider.value;
+            bondLengthStrengthValue.textContent = bondLengthStrengthSlider.value;
+            bondAngleStrengthValue.textContent = bondAngleStrengthSlider.value;
+            pristineAngleStrengthValue.textContent = pristineAngleStrengthSlider.value;
+            zDisplacementStrengthValue.textContent = zDisplacementStrengthSlider.value;
+            planarityStrengthValue.textContent = planarityStrengthSlider.value;
+            rotationAngleValue.textContent = rotationAngleSlider.value;
+            
+            modelSizeSlider.addEventListener('input', (e) => modelSizeValue.textContent = e.target.value);
+            packingDensitySlider.addEventListener('input', (e) => packingDensityValue.textContent = e.target.value);
+            numDefectsSlider.addEventListener('input', (e) => numDefectsValue.textContent = e.target.value);
+            relaxIterationsSlider.addEventListener('input', (e) => relaxIterationsValue.textContent = e.target.value);
+            bondLengthStrengthSlider.addEventListener('input', (e) => bondLengthStrengthValue.textContent = e.target.value);
+            bondAngleStrengthSlider.addEventListener('input', (e) => bondAngleStrengthValue.textContent = e.target.value);
+            pristineAngleStrengthSlider.addEventListener('input', (e) => pristineAngleStrengthValue.textContent = e.target.value);
+            zDisplacementStrengthSlider.addEventListener('input', (e) => zDisplacementStrengthValue.textContent = e.target.value);
+            planarityStrengthSlider.addEventListener('input', (e) => planarityStrengthValue.textContent = e.target.value);
+            rotationAngleSlider.addEventListener('input', (e) => rotationAngleValue.textContent = e.target.value);
+            regenerateBtn.addEventListener('click', regenerateModel);
+            exportCsvBtn.addEventListener('click', exportModelToCsv);
+            exportCsvBtn.disabled = true;
+        }
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x111827);
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(5, 10, 7.5);
+            scene.add(directionalLight);
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            setupUI();
+            
+            window.addEventListener('resize', onWindowResize, false);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        init();
+        animate();
+    </script>
+</body>
+</html>
+
