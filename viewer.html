@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSV 3D Model Viewer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #111827; color: #E5E7EB; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif; overflow: hidden; touch-action: none; }
+        #viewer-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        #controls { position: absolute; top: 10px; right: 10px; padding: 1rem; background-color: rgba(17, 24, 39, 0.85); border-radius: 0.5rem; border: 1px solid #374151; width: 280px; z-index: 101; }
+        #info { position: absolute; top: 10px; left: 10px; padding: 1rem; background-color: rgba(17, 24, 39, 0.85); border-radius: 0.5rem; max-width: 320px; z-index: 100; pointer-events: none; }
+        input[type="file"]::file-selector-button { background-color: #2563eb; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.25rem; cursor: pointer; transition: background-color 0.2s; }
+        input[type="file"]::file-selector-button:hover { background-color: #1d4ed8; }
+        #loading-indicator { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.7); color: white; padding: 1rem 2rem; border-radius: 0.5rem; z-index: 200; display: none; }
+    </style>
+</head>
+<body>
+    <div id="viewer-container"></div>
+    <div id="info" class="text-white">
+        <h1 class="text-2xl font-bold">Atomic Structure Viewer</h1>
+        <p class="text-sm mt-2">Upload a CSV file with x, y, z coordinates to view the model.</p>
+        <p class="text-xs mt-1">Drag to rotate | Scroll to zoom | Right-click drag to pan</p>
+    </div>
+    <div id="controls">
+        <div class="mb-4">
+            <label for="csv-input" class="text-sm text-gray-200 block mb-2">Upload CSV File</label>
+            <input id="csv-input" type="file" accept=".csv" class="w-full text-sm text-gray-300">
+        </div>
+        <div class="mb-4">
+            <label for="atom-size" class="text-sm text-gray-200">Atom Size (<span id="atom-size-value">0.3</span>)</label>
+            <input id="atom-size" type="range" min="0.05" max="1.0" step="0.01" value="0.3" class="w-full">
+        </div>
+        <div class="mb-4">
+            <label for="bond-size" class="text-sm text-gray-200">Bond Size (<span id="bond-size-value">0.08</span>)</label>
+            <input id="bond-size" type="range" min="0.01" max="0.5" step="0.01" value="0.08" class="w-full">
+        </div>
+         <div class="mb-4">
+            <label for="bond-threshold" class="text-sm text-gray-200">Bond Threshold (<span id="bond-threshold-value">1.8</span> Å)</label>
+            <input id="bond-threshold" type="range" min="1.0" max="3.0" step="0.1" value="1.8" class="w-full">
+        </div>
+        <div class="mb-4">
+            <label for="rotation" class="text-sm text-gray-200">Z-Axis Rotation (<span id="rotation-value">0</span>°)</label>
+            <input id="rotation" type="range" min="0" max="360" step="1" value="0" class="w-full">
+        </div>
+        <div class="mb-4">
+            <label for="bg-color" class="text-sm text-gray-200">Background Color</label>
+            <select id="bg-color" class="w-full mt-1 bg-gray-700 border border-gray-600 rounded p-1 text-sm">
+                <option value="dark">Dark</option>
+                <option value="light">Light</option>
+                <option value="grey">Grey</option>
+            </select>
+        </div>
+        <button id="save-png-btn" class="mt-2 w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">Save as PNG</button>
+    </div>
+    <div id="loading-indicator">Loading model...</div>
+
+    <script type="module">
+        import * as THREE from 'https://cdn.skypack.dev/three@0.132.2';
+        import { OrbitControls } from 'https://cdn.skypack.dev/three@0.132.2/examples/jsm/controls/OrbitControls.js';
+
+        let scene, camera, renderer, controls, currentModel;
+        const viewerContainer = document.getElementById('viewer-container');
+        const loadingIndicator = document.getElementById('loading-indicator');
+
+        const atomSizeSlider = document.getElementById('atom-size');
+        const bondSizeSlider = document.getElementById('bond-size');
+        const bondThresholdSlider = document.getElementById('bond-threshold');
+        const rotationSlider = document.getElementById('rotation');
+        const bgColorSelect = document.getElementById('bg-color');
+        const savePngBtn = document.getElementById('save-png-btn');
+
+        const atomSizeValue = document.getElementById('atom-size-value');
+        const bondSizeValue = document.getElementById('bond-size-value');
+        const bondThresholdValue = document.getElementById('bond-threshold-value');
+        const rotationValue = document.getElementById('rotation-value');
+        
+        const fileInput = document.getElementById('csv-input');
+        
+        let atomPositions = [];
+
+        function init() {
+            scene = new THREE.Scene();
+            setTheme(bgColorSelect.value);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 5000);
+            camera.position.z = 50;
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            viewerContainer.appendChild(renderer.domElement);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(5, 10, 7.5);
+            scene.add(directionalLight);
+
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            
+            setupUIListeners();
+            window.addEventListener('resize', onWindowResize, false);
+            animate();
+        }
+
+        function setupUIListeners() {
+            fileInput.addEventListener('change', handleFileSelect);
+            atomSizeSlider.addEventListener('input', (e) => {
+                atomSizeValue.textContent = e.target.value;
+                if (currentModel) redrawModel();
+            });
+            bondSizeSlider.addEventListener('input', (e) => {
+                bondSizeValue.textContent = e.target.value;
+                if (currentModel) redrawModel();
+            });
+            bondThresholdSlider.addEventListener('input', (e) => {
+                bondThresholdValue.textContent = e.target.value;
+                 if (currentModel) redrawModel();
+            });
+            rotationSlider.addEventListener('input', (e) => {
+                const angle = parseInt(e.target.value);
+                rotationValue.textContent = angle;
+                if(currentModel) {
+                    currentModel.rotation.z = THREE.MathUtils.degToRad(angle);
+                }
+            });
+            bgColorSelect.addEventListener('change', (e) => setTheme(e.target.value));
+            savePngBtn.addEventListener('click', saveAsPNG);
+        }
+        
+        function setTheme(theme) {
+            const colors = {
+                dark: 0x111827,
+                light: 0xf3f4f6,
+                grey: 0x6b7280
+            };
+            scene.background = new THREE.Color(colors[theme]);
+        }
+        
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            loadingIndicator.style.display = 'block';
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const text = e.target.result;
+                try {
+                    const rows = text.split('\n').filter(row => row.trim() !== '');
+                    const header = rows.shift().toLowerCase().split(',').map(h => h.trim());
+                    const xIndex = header.indexOf('x');
+                    const yIndex = header.indexOf('y');
+                    const zIndex = header.indexOf('z');
+
+                    if (xIndex === -1 || yIndex === -1 || zIndex === -1) {
+                         throw new Error("CSV must contain 'x', 'y', and 'z' columns.");
+                    }
+
+                    atomPositions = rows.map(row => {
+                        const values = row.split(',');
+                        const x = parseFloat(values[xIndex]);
+                        const y = parseFloat(values[yIndex]);
+                        const z = parseFloat(values[zIndex]);
+                        if (isNaN(x) || isNaN(y) || isNaN(z)) return null;
+                        return new THREE.Vector3(x, y, z);
+                    }).filter(Boolean);
+                    
+                    if (atomPositions.length > 0) {
+                        redrawModel();
+                    } else {
+                        alert("No valid atom coordinates found in the file.");
+                    }
+                } catch (error) {
+                    alert(`Error parsing CSV file: ${error.message}`);
+                    console.error(error);
+                } finally {
+                     loadingIndicator.style.display = 'none';
+                }
+            };
+            reader.readAsText(file);
+        }
+        
+        function redrawModel() {
+            if (currentModel) {
+                scene.remove(currentModel);
+                currentModel.traverse(child => {
+                    if (child.geometry) child.geometry.dispose();
+                    if (child.material) child.material.dispose();
+                });
+            }
+
+            if(atomPositions.length === 0) return;
+
+            const atomRadius = parseFloat(atomSizeSlider.value);
+            const bondRadius = parseFloat(bondSizeSlider.value);
+            const bondThreshold = parseFloat(bondThresholdSlider.value);
+            const rotationAngle = parseInt(rotationSlider.value);
+            
+            const modelGroup = new THREE.Group();
+            const atomGeometry = new THREE.SphereGeometry(atomRadius, 16, 16);
+            const atomMaterial = new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.5 });
+            
+            atomPositions.forEach(pos => {
+                const atomMesh = new THREE.Mesh(atomGeometry, atomMaterial);
+                atomMesh.position.copy(pos);
+                modelGroup.add(atomMesh);
+            });
+
+            const bondMaterial = new THREE.MeshStandardMaterial({ color: 0x6b7280, roughness: 0.5 });
+            const bonds = new Set();
+            for (let i = 0; i < atomPositions.length; i++) {
+                for (let j = i + 1; j < atomPositions.length; j++) {
+                    if (atomPositions[i].distanceTo(atomPositions[j]) < bondThreshold) {
+                         const p1 = atomPositions[i];
+                         const p2 = atomPositions[j];
+                         const bondDir = new THREE.Vector3().subVectors(p2, p1);
+                         const bondLength = bondDir.length();
+                         const bondGeometry = new THREE.CylinderGeometry(bondRadius, bondRadius, bondLength, 8);
+                         const bondMesh = new THREE.Mesh(bondGeometry, bondMaterial);
+                         bondMesh.position.copy(p1).add(bondDir.multiplyScalar(0.5));
+                         bondMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), bondDir.normalize());
+                         modelGroup.add(bondMesh);
+                    }
+                }
+            }
+            
+            modelGroup.rotation.z = THREE.MathUtils.degToRad(rotationAngle);
+            currentModel = modelGroup;
+            scene.add(currentModel);
+            frameModel();
+        }
+
+        function frameModel() {
+            if (!currentModel || atomPositions.length === 0) return;
+
+            const boundingBox = new THREE.Box3().setFromObject(currentModel);
+            const modelCenter = boundingBox.getCenter(new THREE.Vector3());
+            const modelSize = boundingBox.getSize(new THREE.Vector3()).length();
+
+            currentModel.position.sub(modelCenter);
+            
+            const cameraDistance = (modelSize / 2) / Math.tan(camera.fov * (Math.PI / 180) / 2);
+            camera.position.set(0, 0, modelSize * 1.5);
+            camera.near = modelSize / 100;
+            camera.far = modelSize * 100;
+            camera.updateProjectionMatrix();
+
+            controls.target.set(0, 0, 0);
+            controls.update();
+        }
+        
+        function saveAsPNG() {
+            try {
+                renderer.render(scene, camera);
+                const link = document.createElement('a');
+                link.download = 'atomic_model_view.png';
+                link.href = renderer.domElement.toDataURL('image/png');
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            } catch (e) {
+                console.error("Could not save PNG.", e);
+                alert("Sorry, there was an error saving the image.");
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        init();
+    </script>
+</body>
+</html>
+
