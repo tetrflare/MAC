@@ -222,7 +222,7 @@
                 let material;
                 if (edgeAtoms.has(i) || edgeAtoms.has(j)) {
                     material = edgeBondMaterial;
-                } else if (bondsInNonSixRings.has(bondKey)) {
+                } else if (bondsInNonSixRings.includes(bondKey)) {
                     material = greyBondMaterial;
                 } else {
                     material = blueBondMaterial;
