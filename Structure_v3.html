@@ -276,7 +276,8 @@
             statusElement.textContent = 'Initializing worker...';
             if (currentModel) scene.remove(currentModel);
 
-            modelWorker = new Worker('worker.js');
+            // Updated worker creation to specify module type
+            modelWorker = new Worker('worker.js', { type: 'module' });
 
             modelWorker.onmessage = function(e) {
                 const { type, data, message } = e.data;
