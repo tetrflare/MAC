@@ -12,6 +12,9 @@
         #info { position: absolute; top: 10px; left: 10px; padding: 1rem; background-color: rgba(17, 24, 39, 0.85); border-radius: 0.5rem; max-width: 320px; z-index: 100; pointer-events: none; }
         input[type="file"]::file-selector-button { background-color: #2563eb; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.25rem; cursor: pointer; transition: background-color 0.2s; }
         input[type="file"]::file-selector-button:hover { background-color: #1d4ed8; }
+        input[type="color"] { -webkit-appearance: none; -moz-appearance: none; appearance: none; width: 44px; height: 24px; background-color: transparent; border: 1px solid #4b5563; border-radius: 0.25rem; cursor: pointer; }
+        input[type="color"]::-webkit-color-swatch { border-radius: 0.25rem; border: none; }
+        input[type="color"]::-moz-color-swatch { border-radius: 0.25rem; border: none; }
         #loading-indicator { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.7); color: white; padding: 1rem 2rem; border-radius: 0.5rem; z-index: 200; display: none; }
     </style>
 </head>
@@ -38,6 +41,14 @@
          <div class="mb-4">
             <label for="bond-threshold" class="text-sm text-gray-200">Bond Threshold (<span id="bond-threshold-value">1.8</span> Å)</label>
             <input id="bond-threshold" type="range" min="1.0" max="3.0" step="0.1" value="1.8" class="w-full">
+        </div>
+        <div class="flex justify-between items-center mb-4">
+            <label for="atom-color" class="text-sm text-gray-200">Atom Color</label>
+            <input id="atom-color" type="color" value="#2563eb">
+        </div>
+        <div class="flex justify-between items-center mb-4">
+            <label for="bond-color" class="text-sm text-gray-200">Bond Color</label>
+            <input id="bond-color" type="color" value="#6b7280">
         </div>
         <div class="mb-4">
             <label for="rotation" class="text-sm text-gray-200">Z-Axis Rotation (<span id="rotation-value">0</span>°)</label>
@@ -69,6 +80,8 @@
         const rotationSlider = document.getElementById('rotation');
         const bgColorSelect = document.getElementById('bg-color');
         const savePngBtn = document.getElementById('save-png-btn');
+        const atomColorPicker = document.getElementById('atom-color');
+        const bondColorPicker = document.getElementById('bond-color');
 
         const atomSizeValue = document.getElementById('atom-size-value');
         const bondSizeValue = document.getElementById('bond-size-value');
@@ -103,20 +116,41 @@
             window.addEventListener('resize', onWindowResize, false);
             animate();
         }
+        
+        function debounce(func, delay) {
+            let timeout;
+            return function(...args) {
+                const context = this;
+                clearTimeout(timeout);
+                timeout = setTimeout(() => func.apply(context, args), delay);
+            };
+        }
+
+        const debouncedRedrawModel = debounce(() => {
+            if (currentModel) {
+                loadingIndicator.style.display = 'block';
+                setTimeout(() => {
+                    redrawModel();
+                    loadingIndicator.style.display = 'none';
+                }, 10);
+            }
+        }, 500);
+
 
         function setupUIListeners() {
             fileInput.addEventListener('change', handleFileSelect);
+            
             atomSizeSlider.addEventListener('input', (e) => {
                 atomSizeValue.textContent = e.target.value;
-                if (currentModel) redrawModel();
+                debouncedRedrawModel();
             });
             bondSizeSlider.addEventListener('input', (e) => {
                 bondSizeValue.textContent = e.target.value;
-                if (currentModel) redrawModel();
+                debouncedRedrawModel();
             });
             bondThresholdSlider.addEventListener('input', (e) => {
                 bondThresholdValue.textContent = e.target.value;
-                 if (currentModel) redrawModel();
+                debouncedRedrawModel();
             });
             rotationSlider.addEventListener('input', (e) => {
                 const angle = parseInt(e.target.value);
@@ -125,8 +159,29 @@
                     currentModel.rotation.z = THREE.MathUtils.degToRad(angle);
                 }
             });
+
+            atomColorPicker.addEventListener('input', updateModelColors);
+            bondColorPicker.addEventListener('input', updateModelColors);
+
             bgColorSelect.addEventListener('change', (e) => setTheme(e.target.value));
             savePngBtn.addEventListener('click', saveAsPNG);
+        }
+
+        function updateModelColors() {
+            if (!currentModel) return;
+
+            const atomColor = new THREE.Color(atomColorPicker.value);
+            const bondColor = new THREE.Color(bondColorPicker.value);
+
+            currentModel.traverse(child => {
+                if (child.isMesh) {
+                    if (child.geometry.type === 'SphereGeometry') {
+                        child.material.color.set(atomColor);
+                    } else if (child.geometry.type === 'CylinderGeometry') {
+                        child.material.color.set(bondColor);
+                    }
+                }
+            });
         }
         
         function setTheme(theme) {
@@ -199,7 +254,7 @@
             
             const modelGroup = new THREE.Group();
             const atomGeometry = new THREE.SphereGeometry(atomRadius, 16, 16);
-            const atomMaterial = new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.5 });
+            const atomMaterial = new THREE.MeshStandardMaterial({ color: atomColorPicker.value, roughness: 0.5 });
             
             atomPositions.forEach(pos => {
                 const atomMesh = new THREE.Mesh(atomGeometry, atomMaterial);
@@ -207,7 +262,7 @@
                 modelGroup.add(atomMesh);
             });
 
-            const bondMaterial = new THREE.MeshStandardMaterial({ color: 0x6b7280, roughness: 0.5 });
+            const bondMaterial = new THREE.MeshStandardMaterial({ color: bondColorPicker.value, roughness: 0.5 });
             const bonds = new Set();
             for (let i = 0; i < atomPositions.length; i++) {
                 for (let j = i + 1; j < atomPositions.length; j++) {
@@ -237,7 +292,7 @@
             const boundingBox = new THREE.Box3().setFromObject(currentModel);
             const modelCenter = boundingBox.getCenter(new THREE.Vector3());
             const modelSize = boundingBox.getSize(new THREE.Vector3()).length();
-
+            
             currentModel.position.sub(modelCenter);
             
             const cameraDistance = (modelSize / 2) / Math.tan(camera.fov * (Math.PI / 180) / 2);
@@ -281,4 +336,3 @@
     </script>
 </body>
 </html>
-
