@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Versatile Pyodide Canvas</title>
+
+    <!-- Tailwind CSS for modern styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Plotly for interactive charts -->
+    <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+    
+    <!-- Google Fonts for editor -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code&family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        .font-mono { font-family: 'Fira Code', monospace; }
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+
+</head>
+<body class="bg-gray-100 text-gray-800 font-sans p-4 md:p-8">
+
+    <div class="max-w-5xl mx-auto">
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-blue-600">Versatile Pyodide Canvas</h1>
+            <p class="text-lg text-gray-600 mt-2">A robust template for Python data analysis in the browser using Pyodide.</p>
+        </header>
+
+        <!-- Controls Card -->
+        <div id="controls" class="bg-white p-6 rounded-xl shadow-lg mb-6">
+            <div class="flex flex-col sm:flex-row items-center space-y-4 sm:space-y-0 sm:space-x-4">
+                <div class="flex-grow w-full">
+                    <label for="file-input" class="sr-only">Upload Data File (.csv):</label>
+                    <input type="file" id="file-input" accept=".csv" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer">
+                </div>
+                <button id="run-button" class="w-full sm:w-auto bg-blue-600 text-white font-bold py-2 px-6 rounded-full hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-200 disabled:bg-gray-400 disabled:cursor-not-allowed" disabled>
+                    <span id="button-text">Loading Pyodide...</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Status Area -->
+        <div id="status-area" class="bg-white p-4 rounded-xl shadow-lg mb-6 text-center">
+            <p id="status-message" class="text-gray-700">Initializing Python runtime. This may take a moment...</p>
+        </div>
+        
+        <!-- Error Display -->
+        <div id="error-display" class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-xl relative mb-6 hidden" role="alert"></div>
+
+        <!-- Python Code Editor -->
+        <div id="editor-area" class="bg-white p-6 rounded-xl shadow-lg mb-6">
+            <h2 class="text-xl font-bold mb-4 text-center">Python Script Editor</h2>
+            <textarea id="python-code-editor" class="w-full h-96 p-4 bg-gray-800 text-gray-200 border border-gray-600 rounded-lg shadow-inner font-mono text-sm resize-y focus:ring-2 focus:ring-blue-500 focus:outline-none" spellcheck="false"></textarea>
+        </div>
+
+        <!-- Output Area -->
+        <div id="output-area" class="grid grid-cols-1 gap-6">
+            <div class="bg-white p-6 rounded-xl shadow-lg min-h-[400px]">
+                <h2 class="text-xl font-bold mb-4 text-center">Interactive Plot</h2>
+                <div id="plot-output" class="w-full h-full flex items-center justify-center text-gray-400">
+                    <p>Your plot will appear here...</p>
+                </div>
+            </div>
+            <div class="bg-white p-6 rounded-xl shadow-lg min-h-[400px]">
+                 <h2 class="text-xl font-bold mb-4 text-center">Data Preview (First 5 Rows)</h2>
+                <div id="table-output-container" class="overflow-x-auto">
+                    <div id="table-output" class="w-full h-full flex items-center justify-center text-gray-400">
+                        <p>A preview of your data will appear here...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- JAVASCRIPT "BRIDGE" -->
+    <script type="module">
+        // UI manipulation functions, callable from Python via the 'js' module
+        window.ui = {
+            setStatus: (message) => {
+                document.getElementById('status-message').textContent = message;
+                const isProcessing = message.startsWith('Processing');
+                document.getElementById('run-button').disabled = isProcessing;
+                document.getElementById('button-text').textContent = isProcessing ? 'Running...' : 'Run Analysis';
+            },
+            displayPlot: (spec) => {
+                const plotDiv = document.getElementById('plot-output');
+                plotDiv.innerHTML = '';
+                try {
+                    Plotly.newPlot(plotDiv, JSON.parse(spec), {}, {responsive: true});
+                } catch (e) {
+                    window.ui.displayError(`Failed to render plot: ${e}`);
+                }
+            },
+            displayTable: (html) => {
+                const tableOutput = document.getElementById('table-output');
+                tableOutput.innerHTML = html;
+                const tableHeader = tableOutput.querySelector('thead');
+                if(tableHeader) {
+                    tableHeader.classList.add('text-xs', 'text-gray-700', 'uppercase', 'bg-gray-50');
+                }
+            },
+            displayError: (errorMsg) => {
+                const errorDiv = document.getElementById('error-display');
+                errorDiv.textContent = `ERROR: ${errorMsg}`;
+                errorDiv.classList.remove('hidden');
+                window.ui.setStatus("An error occurred. Please check the details.");
+            },
+            clearOutputs: () => {
+                document.getElementById('error-display').classList.add('hidden');
+                document.getElementById('plot-output').innerHTML = '<p>Your plot will appear here...</p>';
+                document.getElementById('table-output').innerHTML = '<p>A preview of your data will appear here...</p>';
+            }
+        };
+
+        async function getFileInputContent() {
+            const fileInput = document.getElementById('file-input');
+            if (fileInput.files.length === 0) return null;
+            return await fileInput.files[0].text();
+        }
+
+        async function main() {
+            const runButton = document.getElementById('run-button');
+            const fileInput = document.getElementById('file-input');
+            const statusMessage = document.getElementById('status-message');
+            const buttonText = document.getElementById('button-text');
+            const codeEditor = document.getElementById('python-code-editor');
+
+            // The default Python script is now defined here
+            const defaultPythonScript = `
+import js
+import pandas as pd
+import numpy as np
+import io
+import json
+import plotly.express as px
+from pyodide.ffi import to_js
+
+def generate_plotly_plot(df):
+    """Generates a Plotly plot and returns it as a JSON string."""
+    numeric_df = df.select_dtypes(include=np.number)
+    if numeric_df.empty:
+        return json.dumps({
+            "data": [],
+            "layout": {"title": "No numeric data available to plot."}
+        })
+
+    fig = px.line(numeric_df, title="Data Analysis Result (Plotly)")
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)", 
+        plot_bgcolor="rgba(0,0,0,0)",
+        font_color="#374151"
+    )
+    return fig.to_json()
+
+def run_analysis():
+    """
+    The main computational function.
+    It reads 'csv_data' from the global scope set by JavaScript.
+    """
+    try:
+        js.ui.clearOutputs()
+        js.ui.setStatus("Processing data...")
+        
+        # The global variable 'csv_data' is set by the JavaScript host.
+        df = pd.read_csv(io.StringIO(csv_data))
+        
+        # The dataframe is passed directly to the outputs without modification.
+        processed_df = df.copy()
+
+        table_html = processed_df.head().to_html(
+            classes='w-full text-sm text-left text-gray-500',
+            border=0,
+            index=False
+        )
+        plot_json = generate_plotly_plot(processed_df)
+        
+        js.ui.displayTable(table_html)
+        js.ui.displayPlot(plot_json)
+        js.ui.setStatus("Analysis complete.")
+
+    except Exception as e:
+        print(f"Error in Python: {e}")
+        js.ui.displayError(str(e))
+
+# Run the main analysis function
+run_analysis()
+`;
+            // Populate the editor with the default script
+            codeEditor.value = defaultPythonScript.trim();
+
+
+            try {
+                // Initialize Pyodide
+                let pyodide = await loadPyodide();
+                statusMessage.textContent = 'Loading Python packages...';
+                
+                // Load micropip and install packages
+                await pyodide.loadPackage("micropip");
+                const micropip = pyodide.pyimport("micropip");
+                await micropip.install(['pandas', 'numpy', 'plotly']);
+                
+                statusMessage.textContent = 'Application ready. Please upload a file and click "Run Analysis".';
+                buttonText.textContent = 'Run Analysis';
+                
+                // Enable run button only when a file is selected
+                fileInput.addEventListener('change', () => {
+                    if (fileInput.files.length > 0) {
+                        runButton.disabled = false;
+                    }
+                });
+
+                // Set up the click handler to run the Python code
+                runButton.addEventListener('click', async () => {
+                    const fileContent = await getFileInputContent();
+                    if (!fileContent) {
+                        ui.displayError("Please select a data file first.");
+                        return;
+                    }
+
+                    try {
+                        // Get the current code from the editor
+                        const userCode = codeEditor.value;
+
+                        // Pass the file content to the Python environment
+                        pyodide.globals.set('csv_data', fileContent);
+                        
+                        // Run the user's code from the editor
+                        await pyodide.runPythonAsync(userCode);
+                        
+                    } catch (e) {
+                        console.error("Error running Python code:", e);
+                        ui.displayError(e.message);
+                    }
+                });
+
+            } catch (error) {
+                console.error('Pyodide initialization failed:', error);
+                statusMessage.textContent = `Error loading Pyodide: ${error.message}`;
+                buttonText.textContent = 'Error';
+            }
+        }
+
+        main();
+
+    </script>
+    
+    <!-- Pyodide Script -->
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.25.1/full/pyodide.js"></script>
+
+</body>
+</html>
+
